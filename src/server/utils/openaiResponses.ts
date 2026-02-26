@@ -85,7 +85,11 @@ export const closeMessageOutputItem = async (
   outputIndex: number,
   contentIndex: number,
   accumulatedText: string,
+  sequenceNumberRef?: { value: number },
 ): Promise<OutputItem> => {
+  const nextSeq = () =>
+    sequenceNumberRef ? sequenceNumberRef.value++ : undefined;
+
   await sseStream.writeSSE({
     event: "response.output_text.done",
     data: JSON.stringify({
@@ -94,6 +98,7 @@ export const closeMessageOutputItem = async (
       output_index: outputIndex,
       content_index: contentIndex,
       text: accumulatedText,
+      sequence_number: nextSeq(),
     }),
   });
 
@@ -109,6 +114,7 @@ export const closeMessageOutputItem = async (
         text: accumulatedText,
         annotations: [],
       },
+      sequence_number: nextSeq(),
     }),
   });
 
@@ -132,6 +138,7 @@ export const closeMessageOutputItem = async (
       type: "response.output_item.done",
       output_index: outputIndex,
       item: outputItem,
+      sequence_number: nextSeq(),
     }),
   });
 
@@ -293,12 +300,100 @@ export const convertResponsesItemToVSCode = (
     ]);
   }
 
-  // Handle item_reference (not supported)
-  if (typedItem.type === "item_reference") {
-    logger.warn(
-      "item_reference is not supported without previous_response_id, skipping",
-    );
-    return null;
+  // Handle custom_tool_call
+  if (typedItem.type === "custom_tool_call") {
+    const ctc = typedItem as {
+      call_id?: string;
+      id?: string;
+      name?: string;
+      input?: string;
+    };
+
+    const callId = ctc.call_id || ctc.id || "";
+    const toolName = ctc.name || "custom_tool";
+    let input: Record<string, unknown> = {};
+
+    if (typeof ctc.input === "string") {
+      try {
+        const parsed = JSON.parse(ctc.input);
+        input =
+          parsed && typeof parsed === "object"
+            ? (parsed as Record<string, unknown>)
+            : { input: parsed };
+      } catch {
+        // Custom tool input can be plain text, not only JSON.
+        input = { input: ctc.input };
+      }
+    }
+
+    return vscode.LanguageModelChatMessage.Assistant([
+      new vscode.LanguageModelToolCallPart(callId, toolName, input),
+    ]);
+  }
+
+  // Handle custom_tool_call_output
+  if (typedItem.type === "custom_tool_call_output") {
+    const ctco = typedItem as {
+      call_id?: string;
+      id?: string;
+      output?: unknown;
+    };
+    const callId = ctco.call_id || ctco.id || "";
+    const outputText =
+      typeof ctco.output === "string"
+        ? ctco.output
+        : JSON.stringify(ctco.output ?? typedItem);
+
+    return vscode.LanguageModelChatMessage.User([
+      new vscode.LanguageModelToolResultPart(callId, [
+        new vscode.LanguageModelTextPart(outputText),
+      ]),
+    ]);
+  }
+
+  // Handle built-in tool calls (local_shell_call, shell_call, apply_patch_call)
+  // Convert them to equivalent LanguageModelToolCallPart messages
+  if (
+    typedItem.type === "local_shell_call" ||
+    typedItem.type === "shell_call" ||
+    typedItem.type === "apply_patch_call"
+  ) {
+    const callId =
+      (typedItem.call_id as string) || (typedItem.id as string) || "";
+    const toolName =
+      typedItem.type === "apply_patch_call" ? "apply_patch" : "shell";
+    // Extract the action/arguments from the built-in call
+    let input: Record<string, unknown> = {};
+    if (typedItem.action && typeof typedItem.action === "object") {
+      input = typedItem.action as Record<string, unknown>;
+    } else if (typedItem.operation && typeof typedItem.operation === "object") {
+      // apply_patch_call payloads use "operation" in OpenAI Responses API.
+      input = typedItem.operation as Record<string, unknown>;
+    } else if (typedItem.patch && typeof typedItem.patch === "string") {
+      input = { patch: typedItem.patch };
+    }
+    return vscode.LanguageModelChatMessage.Assistant([
+      new vscode.LanguageModelToolCallPart(callId, toolName, input),
+    ]);
+  }
+
+  // Handle built-in tool call outputs (local_shell_call_output, shell_call_output, apply_patch_call_output)
+  if (
+    typedItem.type === "local_shell_call_output" ||
+    typedItem.type === "shell_call_output" ||
+    typedItem.type === "apply_patch_call_output"
+  ) {
+    const callId =
+      (typedItem.call_id as string) || (typedItem.id as string) || "";
+    const outputText =
+      typeof typedItem.output === "string"
+        ? (typedItem.output as string)
+        : JSON.stringify(typedItem.output ?? typedItem);
+    return vscode.LanguageModelChatMessage.User([
+      new vscode.LanguageModelToolResultPart(callId, [
+        new vscode.LanguageModelTextPart(outputText),
+      ]),
+    ]);
   }
 
   // Handle EasyInputMessage (has role and content, type is optional or "message")
@@ -311,7 +406,7 @@ export const convertResponsesItemToVSCode = (
     return convertInputMessage(item as unknown as ResponseInputItem.Message);
   }
 
-  logger.warn("Unknown input item type, skipping:", typedItem.type);
+  logger.warn("Unsupported input item type, skipping:", typedItem.type);
   return null;
 };
 
@@ -358,7 +453,9 @@ export const convertResponsesInputToVSCode = (
 };
 
 /**
- * Convert Responses API tools to VSCode LM tools (filter unsupported)
+ * Convert Responses API tools to VSCode LM tools.
+ * Built-in tool types (local_shell, shell, apply_patch, custom) are converted
+ * to function tool equivalents so the VSCode LM can use them.
  */
 export const convertResponsesToolsToVSCode = (
   tools?: Tool[],
@@ -383,12 +480,125 @@ export const convertResponsesToolsToVSCode = (
         inputSchema: funcTool.parameters ?? undefined,
       });
     } else {
-      // Known tool types are expected and frequent, so keep the log at debug.
-      logger.debug(`Tool type "${tool.type}" not supported, skipping`);
+      // Convert built-in tool types to function equivalents
+      const builtinTool = convertBuiltinToolToFunction(tool);
+      if (builtinTool) {
+        vsCodeTools.push(builtinTool);
+      } else {
+        logger.debug(`Tool type "${tool.type}" not supported, skipping`);
+      }
     }
   }
 
   return vsCodeTools;
+};
+
+/**
+ * Convert a built-in Responses API tool type to an equivalent VSCode LM
+ * function tool. Returns null for unsupported tool types.
+ */
+const convertBuiltinToolToFunction = (
+  tool: Tool,
+): vscode.LanguageModelChatTool | null => {
+  const type = (tool as { type: string }).type;
+
+  switch (type) {
+    case "local_shell":
+      return {
+        name: "shell",
+        description:
+          "Runs a shell command on the user's machine and returns the output. Use this to execute commands, run scripts, install packages, etc.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                'The command to run as an array of strings (e.g. ["ls", "-la"])',
+            },
+            working_directory: {
+              type: "string",
+              description: "The working directory for the command",
+            },
+            timeout_ms: {
+              type: "number",
+              description:
+                "Optional timeout in milliseconds for the command (default: 600000)",
+            },
+          },
+          required: ["command"],
+        },
+      };
+
+    case "shell":
+      return {
+        name: "shell",
+        description:
+          "Runs a shell command on the user's machine and returns the output.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: {
+              type: "array",
+              items: { type: "string" },
+              description: "The command to run as an array of strings",
+            },
+            working_directory: {
+              type: "string",
+              description: "The working directory for the command",
+            },
+            timeout_ms: {
+              type: "number",
+              description: "Optional timeout in milliseconds",
+            },
+          },
+          required: ["command"],
+        },
+      };
+
+    case "apply_patch":
+      return {
+        name: "apply_patch",
+        description:
+          "Applies a patch to files on the user's machine. Use unified diff format to create, modify, or delete files.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            patch: {
+              type: "string",
+              description:
+                "The patch content in unified diff format to apply to files",
+            },
+          },
+          required: ["patch"],
+        },
+      };
+
+    case "custom": {
+      // Custom tools expose input constraints via `format` in OpenAI Responses API.
+      // Keep a fallback to legacy `input_schema` payloads for compatibility.
+      const customTool = tool as {
+        type: string;
+        name?: string;
+        description?: string;
+        format?: Record<string, unknown>;
+        input_schema?: Record<string, unknown>;
+      };
+      if (customTool.name) {
+        return {
+          name: customTool.name,
+          description: customTool.description ?? "",
+          inputSchema:
+            customTool.format ?? customTool.input_schema ?? undefined,
+        };
+      }
+      return null;
+    }
+
+    default:
+      return null;
+  }
 };
 
 /**

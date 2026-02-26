@@ -203,6 +203,78 @@ suite("OpenAI Responses Conversion Utils Test Suite", () => {
       );
     });
 
+    test("should convert custom_tool_call item", () => {
+      const item = {
+        type: "custom_tool_call" as const,
+        call_id: "call_custom_123",
+        name: "extract_data",
+        input: '{"key":"value"}',
+      };
+
+      const result = convertResponsesItemToVSCode(item as any);
+      assert.ok(result);
+      assert.strictEqual(
+        result!.role,
+        vscode.LanguageModelChatMessageRole.Assistant,
+      );
+
+      const part = result!.content[0];
+      assert.ok(part instanceof vscode.LanguageModelToolCallPart);
+      if (part instanceof vscode.LanguageModelToolCallPart) {
+        assert.strictEqual(part.callId, "call_custom_123");
+        assert.strictEqual(part.name, "extract_data");
+        assert.deepStrictEqual(part.input, { key: "value" });
+      }
+    });
+
+    test("should convert custom_tool_call_output item", () => {
+      const item = {
+        type: "custom_tool_call_output" as const,
+        call_id: "call_custom_123",
+        output: "done",
+      };
+
+      const result = convertResponsesItemToVSCode(item as any);
+      assert.ok(result);
+      assert.strictEqual(
+        result!.role,
+        vscode.LanguageModelChatMessageRole.User,
+      );
+    });
+
+    test("should convert apply_patch_call using operation payload", () => {
+      const item = {
+        type: "apply_patch_call" as const,
+        id: "ap_123",
+        call_id: "call_patch_123",
+        operation: {
+          type: "update_file" as const,
+          path: "src/file.ts",
+          diff: "@@ -1 +1 @@\n-a\n+b",
+        },
+        status: "completed" as const,
+      };
+
+      const result = convertResponsesItemToVSCode(item);
+      assert.ok(result);
+      assert.strictEqual(
+        result!.role,
+        vscode.LanguageModelChatMessageRole.Assistant,
+      );
+
+      const part = result!.content[0];
+      assert.ok(part instanceof vscode.LanguageModelToolCallPart);
+      if (part instanceof vscode.LanguageModelToolCallPart) {
+        assert.strictEqual(part.callId, "call_patch_123");
+        assert.strictEqual(part.name, "apply_patch");
+        assert.deepStrictEqual(part.input, {
+          type: "update_file",
+          path: "src/file.ts",
+          diff: "@@ -1 +1 @@\n-a\n+b",
+        });
+      }
+    });
+
     test("should return null for item_reference", () => {
       const item = { type: "item_reference" as const, id: "ref_123" };
       const result = convertResponsesItemToVSCode(item);
@@ -320,6 +392,30 @@ suite("OpenAI Responses Conversion Utils Test Suite", () => {
       const result = convertResponsesToolsToVSCode(tools);
       assert.strictEqual(result.length, 1);
       assert.strictEqual(result[0].name, "valid_function");
+    });
+
+    test("should convert custom tool using format as input schema", () => {
+      const tools = [
+        {
+          type: "custom" as const,
+          name: "extract_invoice",
+          description: "Extract fields from invoice text",
+          format: {
+            type: "grammar",
+            syntax: "regex",
+            definition: "[A-Z]+",
+          },
+        },
+      ];
+
+      const result = convertResponsesToolsToVSCode(tools as any);
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].name, "extract_invoice");
+      assert.deepStrictEqual(result[0].inputSchema, {
+        type: "grammar",
+        syntax: "regex",
+        definition: "[A-Z]+",
+      });
     });
 
     test("should handle undefined tools", () => {
