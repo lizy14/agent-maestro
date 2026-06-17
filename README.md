@@ -93,7 +93,7 @@ You can choose between:
 - **User Settings** (`~/.codebuddy/models.json`): Personal global settings for all projects
 - **Project Settings** (`<workspace>/.codebuddy/models.json`): Project-specific settings
 
-This automatically creates or updates `.codebuddy/models.json` with an OpenAI-compatible endpoint that points to Agent Maestro proxy:
+This automatically creates or updates `.codebuddy/models.json` with all proxy-eligible VS Code chat models, each routed to Agent Maestro's OpenAI-compatible endpoint:
 
 ```json
 {
@@ -106,9 +106,18 @@ This automatically creates or updates `.codebuddy/models.json` with an OpenAI-co
       "maxInputTokens": 272000,
       "url": "http://127.0.0.1:23333/api/openai/v1/chat/completions",
       "supportsToolCall": true
+    },
+    {
+      "id": "claude-sonnet-4",
+      "name": "Claude Sonnet 4 (Agent Maestro)",
+      "vendor": "OpenAI",
+      "apiKey": "Powered by Agent Maestro",
+      "maxInputTokens": 200000,
+      "url": "http://127.0.0.1:23333/api/openai/v1/chat/completions",
+      "supportsToolCall": true
     }
   ],
-  "availableModels": ["gpt-5.5"]
+  "availableModels": ["gpt-5.5", "claude-sonnet-4"]
 }
 ```
 

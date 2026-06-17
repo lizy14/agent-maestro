@@ -621,12 +621,20 @@ export function registerConfiguratorCommands(
           return;
         }
 
-        const selectedModel = await vscode.window.showQuickPick(modelOptions, {
-          title: "Select model",
-          placeHolder: "Choose which model to use with WorkBuddy",
-        });
+        const availableModelItems = modelOptions.filter(
+          (
+            model,
+          ): model is {
+            label: string;
+            modelId: string;
+            maxInputTokens?: number;
+          } => typeof model.modelId === "string" && model.modelId.length > 0,
+        );
 
-        if (!selectedModel?.modelId) {
+        if (availableModelItems.length === 0) {
+          vscode.window.showErrorMessage(
+            "No proxy-eligible chat model provided by VS Code LM API.",
+          );
           return;
         }
 
@@ -634,48 +642,26 @@ export function registerConfiguratorCommands(
         const existingModels = Array.isArray(existingConfig.models)
           ? existingConfig.models
           : [];
-
-        const existingModel = existingModels.find(
-          (model) => model.id === selectedModel.modelId,
+        const existingModelsById = new Map(
+          existingModels.map((model) => [model.id, model] as const),
         );
-        const updatedModel: WorkBuddyModelConfig = {
-          ...existingModel,
-          id: selectedModel.modelId,
-          name: withAgentMaestroSuffix(selectedModel.label),
-          vendor: existingModel?.vendor ?? "OpenAI",
-          apiKey: existingModel?.apiKey ?? "Powered by Agent Maestro",
-          ...(selectedModel.maxInputTokens
-            ? { maxInputTokens: selectedModel.maxInputTokens }
-            : {}),
-          url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1/chat/completions`,
-          supportsToolCall: existingModel?.supportsToolCall ?? true,
-        };
-
-        const updatedModels =
-          existingModels.findIndex(
-            (model) => model.id === selectedModel.modelId,
-          ) >= 0
-            ? existingModels.map((model) =>
-                model.id === selectedModel.modelId ? updatedModel : model,
-              )
-            : [...existingModels, updatedModel];
-        const updatedModelsWithSuffixedNames = updatedModels.map((model) => ({
-          ...model,
-          name: withAgentMaestroSuffix(model.name),
-        }));
-        const existingAvailableModels = Array.isArray(
-          existingConfig.availableModels,
-        )
-          ? existingConfig.availableModels.filter(
-              (modelId): modelId is string => typeof modelId === "string",
-            )
-          : [];
+        const updatedModelsWithSuffixedNames = availableModelItems.map((model) => {
+          const existingModel = existingModelsById.get(model.modelId);
+          return {
+            ...existingModel,
+            id: model.modelId,
+            name: withAgentMaestroSuffix(model.label),
+            vendor: existingModel?.vendor ?? "OpenAI",
+            apiKey: existingModel?.apiKey ?? "Powered by Agent Maestro",
+            ...(model.maxInputTokens ? { maxInputTokens: model.maxInputTokens } : {}),
+            url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1/chat/completions`,
+            supportsToolCall: existingModel?.supportsToolCall ?? true,
+          };
+        });
         const updatedConfig: WorkBuddyModelsFileConfig = {
           ...existingConfig,
           models: updatedModelsWithSuffixedNames,
-          availableModels: [
-            ...new Set([...existingAvailableModels, selectedModel.modelId]),
-          ],
+          availableModels: updatedModelsWithSuffixedNames.map((model) => model.id),
         };
 
         fs.mkdirSync(path.dirname(workBuddyModelsPath), { recursive: true });
@@ -685,7 +671,7 @@ export function registerConfiguratorCommands(
         );
 
         vscode.window.showInformationMessage(
-          `WorkBuddy settings ${fileExists ? "updated" : "created"} successfully! The model points to Agent Maestro proxy server for OpenAI-compatible API.`,
+          `WorkBuddy settings ${fileExists ? "updated" : "created"} successfully! All proxy-eligible models point to Agent Maestro proxy server for OpenAI-compatible API.`,
         );
 
         logger.info(
