@@ -5,7 +5,7 @@
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/Joouis.agent-maestro)](https://marketplace.visualstudio.com/items?itemName=Joouis.agent-maestro)
 [![License](https://img.shields.io/github/license/Joouis/agent-maestro)](./LICENSE) -->
 
-Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Cline or Roo on demand and plug Claude Code, Codex, or Gemini CLI straight in through an OpenAI/Anthropic/Gemini-compatible API.
+Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Cline or Roo on demand and plug Claude Code, Codex, Gemini CLI, or WorkBuddy straight in through an OpenAI/Anthropic/Gemini-compatible API.
 
 ![Claude Code Support](https://media.githubusercontent.com/media/Joouis/agent-maestro/main/assets/configure-claude-code-demo.gif)
 
@@ -15,9 +15,9 @@ Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Clin
 
 Turn VS Code into your compliant AI playground with powerful API compatibility and one-click setup:
 
-- **Universal API Compatibility**: Anthropic (`/messages`), OpenAI (`/chat/completions`, `/responses`), and Gemini compatible endpoints - use Claude Code, Codex, Gemini CLI or any LLM client seamlessly
+- **Universal API Compatibility**: Anthropic (`/messages`), OpenAI (`/chat/completions`, `/responses`), and Gemini compatible endpoints - use Claude Code, Codex, Gemini CLI, WorkBuddy, or any LLM client seamlessly
   - **Token Usage Reporting**: Reports Copilot-provided Anthropic token usage when available, including prompt cache reads and writes, with estimated token counts as a fallback
-- **One-Click Setup**: Automated configuration commands for instant Claude Code, Codex, and Gemini CLI integration
+- **One-Click Setup**: Automated configuration commands for instant Claude Code, Codex, Gemini CLI, and WorkBuddy integration
 - **Headless AI Agent Control**: Create and manage tasks through REST APIs for Roo Code and Cline extensions
   - **Comprehensive APIs**: Complete task lifecycle management with OpenAPI documentation at `/openapi.json`
   - **Parallel Execution**: Run up to 20 concurrent RooCode (and its variants like Kilo Code) tasks with built-in MCP server integration
@@ -34,6 +34,7 @@ Agent Maestro assumes you already installed one of the supported AI coding exten
 - [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) for personal development routines
 - [Codex](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) for personal development routines
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) for personal development routines
+- [WorkBuddy / CodeBuddy](https://www.codebuddy.cn/) for custom OpenAI-compatible model routing
 
 ### Installation
 
@@ -83,6 +84,34 @@ Additionally, it creates or updates `settings.json` in the same folder to skip t
 }
 ```
 
+### One-Click Setup for WorkBuddy
+
+Configure WorkBuddy to use VS Code's language models with a single command `Agent Maestro: Configure WorkBuddy Settings` via Command Palette.
+
+You can choose between:
+
+- **User Settings** (`~/.codebuddy/models.json`): Personal global settings for all projects
+- **Project Settings** (`<workspace>/.codebuddy/models.json`): Project-specific settings
+
+This automatically creates or updates `.codebuddy/models.json` with an OpenAI-compatible endpoint that points to Agent Maestro proxy:
+
+```json
+{
+  "models": [
+    {
+      "id": "gpt-5.5",
+      "name": "GPT-5.5",
+      "vendor": "OpenAI",
+      "apiKey": "Powered by Agent Maestro",
+      "maxInputTokens": 272000,
+      "url": "http://127.0.0.1:23333/api/openai/v1/chat/completions",
+      "supportsToolCall": true
+    }
+  ],
+  "availableModels": ["gpt-5.5"]
+}
+```
+
 ### GitHub Copilot Chat Model Enhancement
 
 Enable additional models in GitHub Copilot Chat with the `Agent Maestro: Fix GitHub Copilot Chat - Model is not supported error` command. ([ref](https://github.com/cline/cline/issues/2186#issuecomment-2727010228))
@@ -126,6 +155,7 @@ This feature:
    - `Agent Maestro: Configure Claude Code Settings` - One-click Claude Code setup
    - `Agent Maestro: Configure Codex Settings` - One-click Codex setup
    - `Agent Maestro: Configure Gemini CLI Settings` - One-click Gemini CLI setup
+   - `Agent Maestro: Configure WorkBuddy Settings` - One-click WorkBuddy setup
    - `Agent Maestro: Fix GitHub Copilot Chat - Model is not supported error` - Remove header restriction to enable additional models
    - `Agent Maestro: Set LLM API Key` - Configure authentication for LLM API endpoints
 

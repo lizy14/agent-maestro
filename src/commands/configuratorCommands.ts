@@ -17,6 +17,27 @@ import { createCommandHandler } from "./commandHandler";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
+interface WorkBuddyModelConfig {
+  id: string;
+  name?: string;
+  vendor?: string;
+  apiKey?: string;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  url?: string;
+  temperature?: number;
+  supportsToolCall?: boolean;
+  supportsImages?: boolean;
+  supportsReasoning?: boolean;
+  relatedModels?: Record<string, string>;
+}
+
+interface WorkBuddyModelsFileConfig {
+  models?: WorkBuddyModelConfig[];
+  availableModels?: string[];
+  [key: string]: unknown;
+}
+
 export function registerConfiguratorCommands(
   proxy: ProxyServer,
   context: vscode.ExtensionContext,
@@ -484,6 +505,171 @@ export function registerConfiguratorCommands(
         );
         logger.info(`Gemini CLI settings.json created: ${settingsJsonPath}`);
       }, "Failed to configure Gemini CLI settings"),
+    ),
+
+    vscode.commands.registerCommand(
+      "agent-maestro.configureWorkBuddy",
+      createCommandHandler(async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+        const settingsType = await vscode.window.showQuickPick(
+          [
+            {
+              label: "User Settings",
+              description:
+                "Personal global settings for all projects (~/.codebuddy/models.json)",
+            },
+            {
+              label: "Project Settings",
+              description:
+                "Project settings in source control (<workspace>/.codebuddy/models.json)",
+            },
+          ],
+          {
+            title: "Configure WorkBuddy Settings",
+            placeHolder: "Choose where to save WorkBuddy model settings",
+          },
+        );
+
+        if (!settingsType) {
+          return;
+        }
+
+        let workBuddyModelsPath: string;
+        if (settingsType.label === "User Settings") {
+          workBuddyModelsPath = path.join(os.homedir(), ".codebuddy", "models.json");
+        } else {
+          if (!workspaceRoot) {
+            vscode.window.showErrorMessage(
+              "No workspace folder found. Please open a workspace to configure project WorkBuddy settings.",
+            );
+            return;
+          }
+          workBuddyModelsPath = path.join(
+            workspaceRoot,
+            ".codebuddy",
+            "models.json",
+          );
+        }
+
+        let existingConfig: WorkBuddyModelsFileConfig = {};
+        let fileExists = false;
+        let parseError = false;
+
+        try {
+          fs.accessSync(workBuddyModelsPath);
+          fileExists = true;
+          try {
+            existingConfig = JSON.parse(
+              fs.readFileSync(workBuddyModelsPath, "utf8"),
+            ) as WorkBuddyModelsFileConfig;
+          } catch (error) {
+            parseError = true;
+            logger.warn(
+              `Failed to parse existing WorkBuddy config: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+
+          const prompt = parseError
+            ? "Failed to load existing models.json. Do you want to create a fresh configuration?"
+            : "models.json already exists. Do you want to update it?";
+
+          const shouldOverride = await vscode.window.showQuickPick(
+            ["Yes", "No"],
+            {
+              title: "WorkBuddy Settings Found",
+              placeHolder: prompt,
+            },
+          );
+
+          if (shouldOverride !== "Yes") {
+            return;
+          }
+
+          if (parseError) {
+            existingConfig = {};
+          }
+        } catch (error) {
+          // File doesn't exist, continue with creation
+        }
+
+        const modelOptions = await getChatModelsQuickPickItems({
+          recommendedModelId: "gpt-5.5",
+          priorityFamily: "openai",
+        });
+
+        if (modelOptions.length === 0) {
+          vscode.window.showErrorMessage(
+            "No available chat model provided by VS Code LM API.",
+          );
+          return;
+        }
+
+        const selectedModel = await vscode.window.showQuickPick(modelOptions, {
+          title: "Select model",
+          placeHolder: "Choose which model to use with WorkBuddy",
+        });
+
+        if (!selectedModel?.modelId) {
+          return;
+        }
+
+        const proxyPort = proxy.getStatus().port;
+        const existingModels = Array.isArray(existingConfig.models)
+          ? existingConfig.models
+          : [];
+
+        const existingModel = existingModels.find(
+          (model) => model.id === selectedModel.modelId,
+        );
+        const updatedModel: WorkBuddyModelConfig = {
+          ...existingModel,
+          id: selectedModel.modelId,
+          name: selectedModel.label,
+          vendor: existingModel?.vendor ?? "OpenAI",
+          apiKey: existingModel?.apiKey ?? "Powered by Agent Maestro",
+          ...(selectedModel.maxInputTokens
+            ? { maxInputTokens: selectedModel.maxInputTokens }
+            : {}),
+          url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1/chat/completions`,
+          supportsToolCall: existingModel?.supportsToolCall ?? true,
+        };
+
+        const updatedModels =
+          existingModels.findIndex((model) => model.id === selectedModel.modelId) >=
+          0
+            ? existingModels.map((model) =>
+                model.id === selectedModel.modelId ? updatedModel : model,
+              )
+            : [...existingModels, updatedModel];
+
+        const existingAvailableModels = Array.isArray(existingConfig.availableModels)
+          ? existingConfig.availableModels.filter(
+              (modelId): modelId is string => typeof modelId === "string",
+            )
+          : [];
+        const updatedConfig: WorkBuddyModelsFileConfig = {
+          ...existingConfig,
+          models: updatedModels,
+          availableModels: [
+            ...new Set([...existingAvailableModels, selectedModel.modelId]),
+          ],
+        };
+
+        fs.mkdirSync(path.dirname(workBuddyModelsPath), { recursive: true });
+        fs.writeFileSync(
+          workBuddyModelsPath,
+          JSON.stringify(updatedConfig, null, 2),
+        );
+
+        vscode.window.showInformationMessage(
+          `WorkBuddy settings ${fileExists ? "updated" : "created"} successfully! The model points to Agent Maestro proxy server for OpenAI-compatible API.`,
+        );
+
+        logger.info(
+          `WorkBuddy settings ${fileExists ? "updated" : "created"}: ${workBuddyModelsPath}`,
+        );
+      }, "Failed to configure WorkBuddy settings"),
     ),
   ];
 
