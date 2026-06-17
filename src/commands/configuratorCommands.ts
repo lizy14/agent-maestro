@@ -621,15 +621,13 @@ export function registerConfiguratorCommands(
           return;
         }
 
-        const availableModelItems = modelOptions.filter(
-          (
-            model,
-          ): model is {
-            label: string;
-            modelId: string;
-            maxInputTokens?: number;
-          } => typeof model.modelId === "string" && model.modelId.length > 0,
-        );
+        const availableModelItems = modelOptions
+          .filter((model) => model.modelId.length > 0)
+          .map((model) => ({
+            modelId: model.modelId,
+            label: model.label,
+            maxInputTokens: model.maxInputTokens,
+          }));
 
         if (availableModelItems.length === 0) {
           vscode.window.showErrorMessage(
@@ -645,23 +643,29 @@ export function registerConfiguratorCommands(
         const existingModelsById = new Map(
           existingModels.map((model) => [model.id, model] as const),
         );
-        const updatedModelsWithSuffixedNames = availableModelItems.map((model) => {
-          const existingModel = existingModelsById.get(model.modelId);
-          return {
-            ...existingModel,
-            id: model.modelId,
-            name: withAgentMaestroSuffix(model.label),
-            vendor: existingModel?.vendor ?? "OpenAI",
-            apiKey: existingModel?.apiKey ?? "Powered by Agent Maestro",
-            ...(model.maxInputTokens ? { maxInputTokens: model.maxInputTokens } : {}),
-            url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1/chat/completions`,
-            supportsToolCall: existingModel?.supportsToolCall ?? true,
-          };
-        });
+        const updatedModelsWithSuffixedNames = availableModelItems.map(
+          (model) => {
+            const existingModel = existingModelsById.get(model.modelId);
+            return {
+              ...existingModel,
+              id: model.modelId,
+              name: withAgentMaestroSuffix(model.label),
+              vendor: existingModel?.vendor ?? "OpenAI",
+              apiKey: existingModel?.apiKey ?? "Powered by Agent Maestro",
+              ...(model.maxInputTokens
+                ? { maxInputTokens: model.maxInputTokens }
+                : {}),
+              url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1/chat/completions`,
+              supportsToolCall: existingModel?.supportsToolCall ?? true,
+            };
+          },
+        );
         const updatedConfig: WorkBuddyModelsFileConfig = {
           ...existingConfig,
           models: updatedModelsWithSuffixedNames,
-          availableModels: updatedModelsWithSuffixedNames.map((model) => model.id),
+          availableModels: updatedModelsWithSuffixedNames.map(
+            (model) => model.id,
+          ),
         };
 
         fs.mkdirSync(path.dirname(workBuddyModelsPath), { recursive: true });
