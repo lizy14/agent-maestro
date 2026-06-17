@@ -521,7 +521,8 @@ export function registerConfiguratorCommands(
     vscode.commands.registerCommand(
       "agent-maestro.configureWorkBuddy",
       createCommandHandler(async () => {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const workspaceRoot =
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
         const settingsType = await vscode.window.showQuickPick(
           [
@@ -548,7 +549,11 @@ export function registerConfiguratorCommands(
 
         let workBuddyModelsPath: string;
         if (settingsType.label === "User Settings") {
-          workBuddyModelsPath = path.join(os.homedir(), ".codebuddy", "models.json");
+          workBuddyModelsPath = path.join(
+            os.homedir(),
+            ".codebuddy",
+            "models.json",
+          );
         } else {
           if (!workspaceRoot) {
             vscode.window.showErrorMessage(
@@ -647,19 +652,20 @@ export function registerConfiguratorCommands(
         };
 
         const updatedModels =
-          existingModels.findIndex((model) => model.id === selectedModel.modelId) >=
-          0
+          existingModels.findIndex(
+            (model) => model.id === selectedModel.modelId,
+          ) >= 0
             ? existingModels.map((model) =>
                 model.id === selectedModel.modelId ? updatedModel : model,
               )
             : [...existingModels, updatedModel];
         const updatedModelsWithSuffixedNames = updatedModels.map((model) => ({
           ...model,
-          ...(typeof model.name === "string"
-            ? { name: withAgentMaestroSuffix(model.name) }
-            : {}),
+          name: withAgentMaestroSuffix(model.name),
         }));
-        const existingAvailableModels = Array.isArray(existingConfig.availableModels)
+        const existingAvailableModels = Array.isArray(
+          existingConfig.availableModels,
+        )
           ? existingConfig.availableModels.filter(
               (modelId): modelId is string => typeof modelId === "string",
             )
