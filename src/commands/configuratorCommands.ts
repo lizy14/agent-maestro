@@ -16,6 +16,17 @@ import { updateEnvFile } from "../utils/updateEnvFile";
 import { createCommandHandler } from "./commandHandler";
 
 const LOOPBACK_HOST = "127.0.0.1";
+const AGENT_MAESTRO_NAME_SUFFIX = " (Agent Maestro)";
+
+function withAgentMaestroSuffix(name?: string): string | undefined {
+  if (!name) {
+    return name;
+  }
+
+  return name.endsWith(AGENT_MAESTRO_NAME_SUFFIX)
+    ? name
+    : `${name}${AGENT_MAESTRO_NAME_SUFFIX}`;
+}
 
 interface WorkBuddyModelConfig {
   id: string;
@@ -625,7 +636,7 @@ export function registerConfiguratorCommands(
         const updatedModel: WorkBuddyModelConfig = {
           ...existingModel,
           id: selectedModel.modelId,
-          name: selectedModel.label,
+          name: withAgentMaestroSuffix(selectedModel.label),
           vendor: existingModel?.vendor ?? "OpenAI",
           apiKey: existingModel?.apiKey ?? "Powered by Agent Maestro",
           ...(selectedModel.maxInputTokens
@@ -642,7 +653,12 @@ export function registerConfiguratorCommands(
                 model.id === selectedModel.modelId ? updatedModel : model,
               )
             : [...existingModels, updatedModel];
-
+        const updatedModelsWithSuffixedNames = updatedModels.map((model) => ({
+          ...model,
+          ...(typeof model.name === "string"
+            ? { name: withAgentMaestroSuffix(model.name) }
+            : {}),
+        }));
         const existingAvailableModels = Array.isArray(existingConfig.availableModels)
           ? existingConfig.availableModels.filter(
               (modelId): modelId is string => typeof modelId === "string",
@@ -650,7 +666,7 @@ export function registerConfiguratorCommands(
           : [];
         const updatedConfig: WorkBuddyModelsFileConfig = {
           ...existingConfig,
-          models: updatedModels,
+          models: updatedModelsWithSuffixedNames,
           availableModels: [
             ...new Set([...existingAvailableModels, selectedModel.modelId]),
           ],

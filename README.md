@@ -100,7 +100,7 @@ This automatically creates or updates `.codebuddy/models.json` with an OpenAI-co
   "models": [
     {
       "id": "gpt-5.5",
-      "name": "GPT-5.5",
+      "name": "GPT-5.5 (Agent Maestro)",
       "vendor": "OpenAI",
       "apiKey": "Powered by Agent Maestro",
       "maxInputTokens": 272000,
