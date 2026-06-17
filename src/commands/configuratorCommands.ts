@@ -621,6 +621,7 @@ export function registerConfiguratorCommands(
           return;
         }
 
+        // QuickPick includes separator items with empty modelId; keep only actual models.
         const availableModelItems = modelOptions
           .filter((model) => model.modelId.length > 0)
           .map((model) => ({
