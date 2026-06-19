@@ -90,10 +90,10 @@ Configure WorkBuddy to use VS Code's language models with a single command `Agen
 
 You can choose between:
 
-- **User Settings** (`~/.codebuddy/models.json`): Personal global settings for all projects
-- **Project Settings** (`<workspace>/.codebuddy/models.json`): Project-specific settings
+- **User Settings** (`~/.codebuddy/models.json` and `~/.workbuddy/models.json`): Personal global settings for all projects
+- **Project Settings** (`<workspace>/.codebuddy/models.json` and `<workspace>/.workbuddy/models.json`): Project-specific settings
 
-This automatically creates or updates `.codebuddy/models.json` with all proxy-eligible VS Code chat models, each routed to Agent Maestro's OpenAI-compatible endpoint:
+This automatically creates or updates both `.codebuddy/models.json` and `.workbuddy/models.json` with all proxy-eligible VS Code chat models, each routed to Agent Maestro's OpenAI-compatible endpoint. Capability flags such as `supportsToolCall` and `supportsImages` are derived from the model metadata returned by the VS Code LM API/Copilot runtime:
 
 ```json
 {
@@ -105,7 +105,8 @@ This automatically creates or updates `.codebuddy/models.json` with all proxy-el
       "apiKey": "Powered by Agent Maestro",
       "maxInputTokens": 272000,
       "url": "http://127.0.0.1:23333/api/openai/v1/chat/completions",
-      "supportsToolCall": true
+      "supportsToolCall": true,
+      "supportsImages": true
     },
     {
       "id": "claude-sonnet-4",
@@ -114,7 +115,8 @@ This automatically creates or updates `.codebuddy/models.json` with all proxy-el
       "apiKey": "Powered by Agent Maestro",
       "maxInputTokens": 200000,
       "url": "http://127.0.0.1:23333/api/openai/v1/chat/completions",
-      "supportsToolCall": true
+      "supportsToolCall": true,
+      "supportsImages": true
     }
   ],
   "availableModels": ["gpt-5.5", "claude-sonnet-4"]
