@@ -99,11 +99,36 @@ class ChatModelsCache {
 
 export const chatModelsCache = ChatModelsCache.getInstance();
 
-const chatModelToQuickPickItem = (model: vscode.LanguageModelChat) => ({
+// `maxOutputTokens` and `capabilities` are present at runtime on Copilot
+// models but only added to the `LanguageModelChat` type in newer @types/vscode
+// versions. Read them defensively so we get the values when available without
+// breaking typecheck against older type definitions.
+//
+// Note on capability field names: the VS Code API type declarations use
+// `imageInput` and `toolCalling`, but Copilot's runtime exposes them as
+// `supportsImageToText` and `supportsToolCalling`. Include both variants so
+// we pick up the real values regardless of which provider is in use.
+type LanguageModelChatWithCapabilities = vscode.LanguageModelChat & {
+  maxOutputTokens?: number;
+  capabilities?: {
+    // VS Code API names
+    imageInput?: boolean;
+    toolCalling?: boolean | number;
+    // Copilot runtime names
+    supportsImageToText?: boolean;
+    supportsToolCalling?: boolean;
+  };
+};
+
+const chatModelToQuickPickItem = (
+  model: LanguageModelChatWithCapabilities,
+) => ({
   label: model.name,
   description: `${model.vendor} - ${model.id}`,
   modelId: model.id,
   maxInputTokens: model.maxInputTokens,
+  maxOutputTokens: model.maxOutputTokens,
+  capabilities: model.capabilities,
 });
 
 export type ModelFamily = "claude" | "gemini" | "openai" | "other";

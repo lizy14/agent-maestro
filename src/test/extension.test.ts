@@ -68,6 +68,7 @@ suite("Extension Test Suite", () => {
         "agent-maestro.configureClaudeCode",
         "agent-maestro.configureCodex",
         "agent-maestro.configureGeminiCli",
+        "agent-maestro.configureWorkBuddy",
       ];
 
       for (const cmd of configuratorCommands) {
