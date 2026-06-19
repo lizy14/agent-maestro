@@ -547,13 +547,14 @@ export function registerConfiguratorCommands(
           return;
         }
 
-        let workBuddyModelsPath: string;
+        // WorkBuddy/CodeBuddy read model config from `.codebuddy/models.json` and
+        // `.workbuddy/models.json`. Write to both so either product picks it up.
+        let configDirs: string[];
         if (settingsType.label === "User Settings") {
-          workBuddyModelsPath = path.join(
-            os.homedir(),
-            ".codebuddy",
-            "models.json",
-          );
+          configDirs = [
+            path.join(os.homedir(), ".codebuddy"),
+            path.join(os.homedir(), ".workbuddy"),
+          ];
         } else {
           if (!workspaceRoot) {
             vscode.window.showErrorMessage(
@@ -561,12 +562,16 @@ export function registerConfiguratorCommands(
             );
             return;
           }
-          workBuddyModelsPath = path.join(
-            workspaceRoot,
-            ".codebuddy",
-            "models.json",
-          );
+          configDirs = [
+            path.join(workspaceRoot, ".codebuddy"),
+            path.join(workspaceRoot, ".workbuddy"),
+          ];
         }
+        const workBuddyModelsPaths = configDirs.map((dir) =>
+          path.join(dir, "models.json"),
+        );
+        // Primary path is used for the existing-config read/merge logic below.
+        const workBuddyModelsPath = workBuddyModelsPaths[0];
 
         let existingConfig: WorkBuddyModelsFileConfig = {};
         let fileExists = false;
@@ -622,12 +627,28 @@ export function registerConfiguratorCommands(
         }
 
         // QuickPick includes separator items with empty modelId; keep only actual models.
+        // The separator variant of the union doesn't carry capability fields, so
+        // extract via a typed map after filtering.
         const availableModelItems = modelOptions
-          .filter((model) => model.modelId.length > 0)
+          .filter(
+            (
+              model,
+            ): model is typeof model & {
+              maxOutputTokens?: number;
+              capabilities?: {
+                imageInput?: boolean;
+                toolCalling?: boolean | number;
+                supportsImageToText?: boolean;
+                supportsToolCalling?: boolean;
+              };
+            } => model.modelId.length > 0,
+          )
           .map((model) => ({
             modelId: model.modelId,
             label: model.label,
             maxInputTokens: model.maxInputTokens,
+            maxOutputTokens: model.maxOutputTokens,
+            capabilities: model.capabilities,
           }));
 
         if (availableModelItems.length === 0) {
@@ -647,6 +668,27 @@ export function registerConfiguratorCommands(
         const updatedModelsWithSuffixedNames = availableModelItems.map(
           (model) => {
             const existingModel = existingModelsById.get(model.modelId);
+            // Copilot exposes image support as `supportsImageToText`; the VS
+            // Code API type declares `imageInput`. Check both. Return
+            // `undefined` when neither is reported so we can fall back to the
+            // existing value or a default below.
+            const imageInputCap = model.capabilities?.imageInput;
+            const imageToTextCap = model.capabilities?.supportsImageToText;
+            const imageSupported =
+              imageInputCap !== undefined || imageToTextCap !== undefined
+                ? imageInputCap === true || imageToTextCap === true
+                : undefined;
+            // Tool calling: Copilot uses `supportsToolCalling` (boolean), the
+            // VS Code API type uses `toolCalling` (boolean | number).
+            const toolCallingCap = model.capabilities?.toolCalling;
+            const supportsToolCallingCap =
+              model.capabilities?.supportsToolCalling;
+            const toolCallingSupported =
+              toolCallingCap !== undefined
+                ? toolCallingCap !== false
+                : supportsToolCallingCap !== undefined
+                  ? supportsToolCallingCap === true
+                  : undefined;
             return {
               ...existingModel,
               id: model.modelId,
@@ -656,8 +698,17 @@ export function registerConfiguratorCommands(
               ...(model.maxInputTokens
                 ? { maxInputTokens: model.maxInputTokens }
                 : {}),
+              ...(model.maxOutputTokens
+                ? { maxOutputTokens: model.maxOutputTokens }
+                : {}),
               url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1/chat/completions`,
-              supportsToolCall: existingModel?.supportsToolCall ?? true,
+              // Capability flags: the live API value wins over the stale
+              // existing value. Only fall back to the existing value (then a
+              // default) when the API doesn't report the capability at all.
+              supportsToolCall:
+                toolCallingSupported ?? existingModel?.supportsToolCall ?? true,
+              supportsImages:
+                imageSupported ?? existingModel?.supportsImages ?? false,
             };
           },
         );
@@ -669,18 +720,17 @@ export function registerConfiguratorCommands(
           ),
         };
 
-        fs.mkdirSync(path.dirname(workBuddyModelsPath), { recursive: true });
-        fs.writeFileSync(
-          workBuddyModelsPath,
-          JSON.stringify(updatedConfig, null, 2),
-        );
+        const serializedConfig = JSON.stringify(updatedConfig, null, 2);
+        for (const targetPath of workBuddyModelsPaths) {
+          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+          fs.writeFileSync(targetPath, serializedConfig);
+          logger.info(
+            `WorkBuddy settings ${fileExists ? "updated" : "created"}: ${targetPath}`,
+          );
+        }
 
         vscode.window.showInformationMessage(
           `WorkBuddy settings ${fileExists ? "updated" : "created"} successfully! All proxy-eligible models point to Agent Maestro proxy server for OpenAI-compatible API.`,
-        );
-
-        logger.info(
-          `WorkBuddy settings ${fileExists ? "updated" : "created"}: ${workBuddyModelsPath}`,
         );
       }, "Failed to configure WorkBuddy settings"),
     ),

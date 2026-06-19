@@ -38,6 +38,12 @@ async function main() {
     platform: "node",
     outfile: "dist/extension.cjs",
     metafile: !production,
+    // esbuild replaces `import.meta` with `{}` in CJS output, which breaks
+    // dependencies that call `createRequire(import.meta.url)` (e.g. mcp-proxy
+    // via fastmcp) — `import.meta.url` becomes `undefined` and activation
+    // throws. Map it to `__filename`, which `createRequire` accepts as an
+    // absolute path string.
+    define: { "import.meta.url": "__filename" },
     external: ["vscode", "@valibot/to-json-schema", "effect", "sury"],
     logLevel: "info",
     plugins: [
