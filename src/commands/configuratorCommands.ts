@@ -538,8 +538,9 @@ export function registerConfiguratorCommands(
             },
           ],
           {
-            title: "Configure WorkBuddy Settings",
-            placeHolder: "Choose where to save WorkBuddy model settings",
+            title: "Configure CodeBuddy / WorkBuddy Settings",
+            placeHolder:
+              "Choose where to save CodeBuddy / WorkBuddy model settings",
           },
         );
 
@@ -558,7 +559,7 @@ export function registerConfiguratorCommands(
         } else {
           if (!workspaceRoot) {
             vscode.window.showErrorMessage(
-              "No workspace folder found. Please open a workspace to configure project WorkBuddy settings.",
+              "No workspace folder found. Please open a workspace to configure project CodeBuddy / WorkBuddy settings.",
             );
             return;
           }
@@ -587,7 +588,7 @@ export function registerConfiguratorCommands(
           } catch (error) {
             parseError = true;
             logger.warn(
-              `Failed to parse existing WorkBuddy config: ${error instanceof Error ? error.message : String(error)}`,
+              `Failed to parse existing CodeBuddy / WorkBuddy config: ${error instanceof Error ? error.message : String(error)}`,
             );
           }
 
@@ -598,7 +599,7 @@ export function registerConfiguratorCommands(
           const shouldOverride = await vscode.window.showQuickPick(
             ["Yes", "No"],
             {
-              title: "WorkBuddy Settings Found",
+              title: "CodeBuddy / WorkBuddy Settings Found",
               placeHolder: prompt,
             },
           );
@@ -725,14 +726,14 @@ export function registerConfiguratorCommands(
           fs.mkdirSync(path.dirname(targetPath), { recursive: true });
           fs.writeFileSync(targetPath, serializedConfig);
           logger.info(
-            `WorkBuddy settings ${fileExists ? "updated" : "created"}: ${targetPath}`,
+            `CodeBuddy / WorkBuddy settings ${fileExists ? "updated" : "created"}: ${targetPath}`,
           );
         }
 
         vscode.window.showInformationMessage(
-          `WorkBuddy settings ${fileExists ? "updated" : "created"} successfully! All proxy-eligible models point to Agent Maestro proxy server for OpenAI-compatible API.`,
+          `CodeBuddy / WorkBuddy settings ${fileExists ? "updated" : "created"} successfully! All proxy-eligible models point to Agent Maestro proxy server for OpenAI-compatible API.`,
         );
-      }, "Failed to configure WorkBuddy settings"),
+      }, "Failed to configure CodeBuddy / WorkBuddy settings"),
     ),
   ];
 

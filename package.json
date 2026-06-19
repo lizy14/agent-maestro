@@ -1,7 +1,7 @@
 {
   "name": "agent-maestro",
   "displayName": "Agent Maestro",
-  "description": "Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Cline or Roo on demand and plug Claude Code, Codex, Gemini CLI, or WorkBuddy straight in through an OpenAI/Anthropic/Gemini-compatible API.",
+  "description": "Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Cline or Roo on demand and plug Claude Code, Codex, Gemini CLI, or CodeBuddy / WorkBuddy straight in through an OpenAI/Anthropic/Gemini-compatible API.",
   "version": "2.9.5",
   "icon": "assets/icons/icon.png",
   "publisher": "Joouis",
@@ -151,7 +151,7 @@
       },
       {
         "command": "agent-maestro.configureWorkBuddy",
-        "title": "Configure WorkBuddy Settings",
+        "title": "Configure CodeBuddy / WorkBuddy Settings",
         "category": "Agent Maestro"
       },
       {
