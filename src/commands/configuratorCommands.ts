@@ -16,12 +16,16 @@ import {
   getClaudeDesktopConfigDirectory,
   updateClaudeDesktopMetadata,
 } from "../utils/claudeDesktop";
+import {
+  createDshManagedBlock,
+  getDshSettingsPath,
+  updateDshSettingsContent,
+} from "../utils/dshSettings";
 import { logger } from "../utils/logger";
 import { updateEnvFile } from "../utils/updateEnvFile";
 import { createCommandHandler } from "./commandHandler";
 
 const LOOPBACK_HOST = "127.0.0.1";
-
 export function registerConfiguratorCommands(
   proxy: ProxyServer,
   context: vscode.ExtensionContext,
@@ -403,6 +407,87 @@ export function registerConfiguratorCommands(
           await vscode.commands.executeCommand("workbench.action.reloadWindow");
         }
       }, "Failed to configure Codex settings"),
+    ),
+
+    vscode.commands.registerCommand(
+      "agent-maestro.configureDsh",
+      createCommandHandler(async () => {
+        const dshSettingsPath = getDshSettingsPath();
+
+        let existingContent = "";
+        let fileExists = false;
+        try {
+          existingContent = fs.readFileSync(dshSettingsPath, "utf8");
+          fileExists = true;
+
+          const shouldOverride = await vscode.window.showQuickPick(
+            ["Yes", "No"],
+            {
+              title: "DSH Settings Found",
+              placeHolder:
+                "Choose Yes to update the Agent Maestro managed block, or No / Esc to cancel.",
+            },
+          );
+
+          if (shouldOverride !== "Yes") {
+            return;
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            vscode.window.showErrorMessage(
+              `Failed to read DSH settings: ${(error as Error).message}`,
+            );
+            return;
+          }
+        }
+
+        const modelOptions = await getChatModelsQuickPickItems({
+          recommendedModelId: "gpt-5.5",
+          priorityFamily: "openai",
+        });
+
+        if (modelOptions.length === 0) {
+          vscode.window.showErrorMessage(
+            "No available chat model provided by VS Code LM API.",
+          );
+          return;
+        }
+
+        const selectedModel = await vscode.window.showQuickPick(modelOptions, {
+          title: "Select model",
+          placeHolder: "Choose which model to use with DSH",
+        });
+
+        if (!selectedModel?.modelId) {
+          return;
+        }
+
+        const proxyPort = proxy.getStatus().port;
+        const managedBlock = createDshManagedBlock({
+          baseURL: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1`,
+          modelId: selectedModel.modelId,
+          modelContextWindow: selectedModel.maxInputTokens ?? undefined,
+        });
+        const update = updateDshSettingsContent(existingContent, managedBlock);
+
+        if (update.blockedByExistingLlmPiAi) {
+          vscode.window.showErrorMessage(
+            "DSH settings contain a conflicting or incomplete llm-pi-ai section. Please repair or remove it before running this command again.",
+          );
+          return;
+        }
+
+        fs.mkdirSync(path.dirname(dshSettingsPath), { recursive: true });
+        fs.writeFileSync(dshSettingsPath, update.content);
+
+        vscode.window.showInformationMessage(
+          `DSH settings ${fileExists ? "updated" : "created"} successfully! Set AGENT_MAESTRO_API_KEY to the Agent Maestro LLM API key, or any non-empty placeholder if authentication is disabled.`,
+        );
+
+        logger.info(
+          `DSH settings ${fileExists ? "updated" : "created"}: ${dshSettingsPath}`,
+        );
+      }, "Failed to configure DSH settings"),
     ),
 
     vscode.commands.registerCommand(
