@@ -2,7 +2,7 @@
   "name": "agent-maestro",
   "displayName": "Agent Maestro",
   "description": "Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Cline or Roo on demand and plug Claude Code or Codex straight in through an OpenAI/Anthropic-compatible API.",
-  "version": "2.9.5",
+  "version": "2.11.1",
   "icon": "assets/icons/icon.png",
   "publisher": "Joouis",
   "repository": "https://github.com/Joouis/agent-maestro",
@@ -10,7 +10,7 @@
     "vscode": "^1.120.0",
     "node": ">=22"
   },
-  "packageManager": "pnpm@10.28.2",
+  "packageManager": "pnpm@11.9.0",
   "categories": [
     "AI",
     "Chat",
@@ -35,7 +35,6 @@
     "autonomous",
     "ai",
     "github copilot",
-    "github copilot chat",
     "anthropic",
     "claude code",
     "claude",
@@ -84,6 +83,12 @@
           "type": "boolean",
           "default": false,
           "description": "Allow the extension to access files outside of the current workspace",
+          "scope": "application"
+        },
+        "agent-maestro.experimentalGpt5PlusWebSearchEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the experimental GPT-5+ web search Copilot bundle patch for OpenAI Responses requests. This is toggled by the Agent Maestro patch/restore commands.",
           "scope": "application"
         }
       }
@@ -140,8 +145,18 @@
         "category": "Agent Maestro"
       },
       {
+        "command": "agent-maestro.configureClaudeDesktop",
+        "title": "Configure Claude Desktop Settings",
+        "category": "Agent Maestro"
+      },
+      {
         "command": "agent-maestro.configureCodex",
         "title": "Configure Codex Settings",
+        "category": "Agent Maestro"
+      },
+      {
+        "command": "agent-maestro.configureDsh",
+        "title": "Configure DSH Settings",
         "category": "Agent Maestro"
       },
       {
@@ -150,8 +165,13 @@
         "category": "Agent Maestro"
       },
       {
-        "command": "agent-maestro.fixCopilotChatModelNotSupported",
-        "title": "Fix GitHub Copilot Chat - Model is not supported error",
+        "command": "agent-maestro.enableExperimentalGpt5PlusWebSearch",
+        "title": "Enable Experimental GPT-5+ Web Search",
+        "category": "Agent Maestro"
+      },
+      {
+        "command": "agent-maestro.restoreExperimentalGpt5PlusWebSearchBackup",
+        "title": "Restore Experimental GPT-5+ Web Search Backup",
         "category": "Agent Maestro"
       },
       {
@@ -176,9 +196,8 @@
     "fastmcp": "^3.5.0",
     "hono": "^4.8.9",
     "image-size": "^2.0.2",
-    "openai": "^6.38.0",
+    "openai": "^6.46.0",
     "smol-toml": "^1.6.0",
-    "uuid": "^11.1.0",
     "zod": "^4.0.10"
   },
   "devDependencies": {
@@ -218,6 +237,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
+    "smoke:vision": "node --experimental-strip-types scripts/test-vision.ts --all-image-types",
     "prepare": "husky",
     "changeset": "changeset",
     "changeset:version": "pnpm changeset version && node .changeset/changelog-polish.js",

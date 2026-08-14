@@ -8,25 +8,44 @@ import * as vscode from "vscode";
 import {
   getChatModelClient,
   getCopilotModelConfiguration,
+  isGpt5PlusModel,
   withCopilotConfiguration,
 } from "../../../utils/chatModels";
+import { readConfiguration } from "../../../utils/config";
+import {
+  AGENT_MAESTRO_WEB_SEARCH_SENTINEL_PARAMETER,
+  AGENT_MAESTRO_WEB_SEARCH_SENTINEL_TOOL_NAME,
+} from "../../../utils/copilotWebSearchConstants";
 import { logger } from "../../../utils/logger";
 import { CommonResponseError } from "../../schemas/openai";
 import { handleErrorWithLogging } from "../../utils/errorDiagnostics";
+import {
+  LanguageModelClientDisconnectedError,
+  LanguageModelRequestLifecycle,
+  LanguageModelRequestTimeoutError,
+  interruptibleLanguageModelStream,
+} from "../../utils/languageModelRequestLifecycle";
 import { extractOpenAIResponsesUsage } from "../../utils/openai";
 import {
   OutputItem,
+  ResponseTool,
   ToolChoice,
   buildResponseOutput,
   closeMessageOutputItem,
   convertResponsesInputToVSCode,
   convertResponsesToolsToVSCode,
   convertToolChoice,
+  customToolCallInput,
+  extractAdditionalTools,
+  generateCustomToolCallId,
   generateFunctionCallId,
   generateMessageId,
   generateResponseId,
   getCurrentTimestamp,
+  getResponsesWebSearchTool,
+  narrowToolsForChoice,
 } from "../../utils/openaiResponses";
+import { SSE_HEARTBEAT, withSseHeartbeat } from "../../utils/sseHeartbeat";
 
 type NonStreamingResponse = Omit<
   OpenAI.Responses.Response,
@@ -49,7 +68,7 @@ const createResponseRoute = createRoute({
 
 Limitations:
 - Stateless: previous_response_id, conversation, item_reference not supported (send full history in input array)
-- Only function tools supported (file_search, web_search, code_interpreter, custom, etc. are ignored)
+- Tools: function, custom, namespace, and additional_tools are supported; web_search tools can be passed through when the experimental GPT-5+ patch is enabled; file_search, code_interpreter, mcp, etc. are ignored
 - Images: only base64 data URI supported (URL-based images fall back to JSON)
 - input_file: not supported (serialized as JSON text)
 - Annotations: always empty (VSCode LM doesn't provide annotations)
@@ -111,16 +130,36 @@ Limitations:
       },
       description: "Internal server error",
     },
+    504: {
+      content: {
+        "application/json": {
+          schema: CommonResponseError,
+        },
+      },
+      description:
+        "Gateway timeout - language model request exceeded 10 minutes",
+    },
   },
 });
 
-export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
+export interface OpenaiResponsesRoutesOptions {
+  heartbeatIntervalMs?: number;
+  requestTimeoutMs?: number;
+  resolveChatModelClient?: typeof getChatModelClient;
+}
+
+export function registerOpenaiResponsesRoutes(
+  app: OpenAPIHono,
+  options: OpenaiResponsesRoutesOptions = {},
+) {
+  const resolveChatModelClient =
+    options.resolveChatModelClient ?? getChatModelClient;
   app.openapi(createResponseRoute, async (c: Context): Promise<Response> => {
     let rawRequestBody: Responses.ResponseCreateParams | undefined;
     let lmChatMessages: vscode.LanguageModelChatMessage[] | undefined;
     let requestedModelId = "";
     let inputTokens = 0;
-    let cancellationTokenSource: vscode.CancellationTokenSource | undefined;
+    let requestLifecycle: LanguageModelRequestLifecycle | undefined;
 
     try {
       // 1. Parse request and extract fields
@@ -224,7 +263,8 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
       }
 
       // 4. Get chat model client
-      const { client, error: clientError } = await getChatModelClient(model);
+      const { client, error: clientError } =
+        await resolveChatModelClient(model);
 
       if (clientError) {
         return c.json(clientError, 404);
@@ -232,8 +272,11 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
 
       logger.debug("/v1/responses payload:");
       logger.debug(JSON.stringify(requestBody, null, 2));
-      cancellationTokenSource = new vscode.CancellationTokenSource();
-      const cancellationToken = cancellationTokenSource.token;
+      requestLifecycle = new LanguageModelRequestLifecycle(
+        c.req.raw.signal,
+        options.requestTimeoutMs,
+      );
+      const cancellationToken = requestLifecycle.token;
 
       logger.info(
         `→ /v1/responses | model: ${
@@ -246,16 +289,88 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
       lmChatMessages = vsCodeMessages;
 
       // 7. Build request options
+      // Tools may arrive both at the top level and as `additional_tools`
+      // items injected mid-conversation; merge both sources.
+      const effectiveTools = [
+        ...(tools ?? []),
+        ...extractAdditionalTools(input),
+      ];
+      const webSearchTool = getResponsesWebSearchTool(effectiveTools);
+      const experimentalWebSearchEnabled = webSearchTool
+        ? readConfiguration().experimentalGpt5PlusWebSearchEnabled
+        : false;
+      const gpt5Plus = webSearchTool ? isGpt5PlusModel(model, client) : false;
+      const shouldUseExperimentalWebSearch =
+        !!webSearchTool && experimentalWebSearchEnabled && gpt5Plus;
+
+      if (webSearchTool) {
+        logger.debug(
+          `Experimental GPT-5+ web search: enabled=${experimentalWebSearchEnabled}, gpt5Plus=${gpt5Plus}, toolType=${webSearchTool.type}, injected=${shouldUseExperimentalWebSearch}`,
+        );
+      }
+
+      if (shouldUseExperimentalWebSearch) {
+        const sentinelTool: ResponseTool = {
+          type: "function",
+          name: AGENT_MAESTRO_WEB_SEARCH_SENTINEL_TOOL_NAME,
+          description:
+            "Internal Agent Maestro marker for Copilot bundle web search patching.",
+          strict: false,
+          parameters: {
+            type: "object",
+            properties: {
+              [AGENT_MAESTRO_WEB_SEARCH_SENTINEL_PARAMETER]: {
+                const: webSearchTool,
+              },
+            },
+          },
+        };
+        effectiveTools.push(sentinelTool);
+      }
+
+      const { tools: vsCodeTools, toolMap } = convertResponsesToolsToVSCode(
+        effectiveTools,
+        {
+          webSearchHandledByCopilotPatch: shouldUseExperimentalWebSearch,
+        },
+      );
       const shouldPassTools =
-        tool_choice !== "none" && tools && tools.length > 0;
+        tool_choice !== "none" && effectiveTools.length > 0;
+
+      let narrowedTools = vsCodeTools;
+      if (shouldPassTools) {
+        const narrowed = narrowToolsForChoice(
+          tool_choice as ToolChoice,
+          vsCodeTools,
+          toolMap,
+        );
+        if (!narrowed.ok) {
+          return c.json(
+            {
+              error: {
+                type: "invalid_request_error",
+                message:
+                  `tool_choice named "${narrowed.targetName}" matched ` +
+                  `${narrowed.matchCount} tools. A named tool_choice must ` +
+                  "resolve to exactly one available tool.",
+                param: "tool_choice",
+                code:
+                  narrowed.matchCount === 0
+                    ? "tool_not_found"
+                    : "ambiguous_tool_choice",
+              },
+            },
+            400,
+          );
+        }
+        narrowedTools = narrowed.tools;
+      }
 
       const lmRequestOptions: vscode.LanguageModelChatRequestOptions = {
         justification:
           "OpenAI Responses API endpoint using VS Code Language Model API",
         modelOptions,
-        tools: shouldPassTools
-          ? convertResponsesToolsToVSCode(tools)
-          : undefined,
+        tools: shouldPassTools ? narrowedTools : undefined,
         toolMode: shouldPassTools
           ? convertToolChoice(tool_choice as ToolChoice)
           : undefined,
@@ -265,14 +380,16 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
       });
 
       // 8. Send request to VSCode LM
-      const response = await client.sendRequest(
-        vsCodeMessages,
-        withCopilotConfiguration(
-          client,
-          lmRequestOptions,
-          copilotConfiguration,
+      const response = await requestLifecycle.waitFor(
+        client.sendRequest(
+          vsCodeMessages,
+          withCopilotConfiguration(
+            client,
+            lmRequestOptions,
+            copilotConfiguration,
+          ),
+          cancellationToken,
         ),
-        cancellationToken,
       );
 
       // 9. Handle non-streaming response
@@ -282,7 +399,10 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           [];
         let responseUsage: ResponseUsage | undefined;
 
-        for await (const chunk of response.stream) {
+        for await (const chunk of interruptibleLanguageModelStream(
+          response.stream,
+          requestLifecycle,
+        )) {
           if (chunk instanceof vscode.LanguageModelTextPart) {
             accumulatedText += chunk.value;
           } else if (chunk instanceof vscode.LanguageModelToolCallPart) {
@@ -297,20 +417,26 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
         }
 
         // Build output
-        const output = buildResponseOutput(accumulatedText, toolCalls);
+        const output = buildResponseOutput(accumulatedText, toolCalls, toolMap);
 
         if (!responseUsage) {
-          const [fallbackInputTokens, outputTokens] = await Promise.all([
-            client.countTokens(JSON.stringify(requestBody), cancellationToken),
-            client.countTokens(
-              accumulatedText + JSON.stringify(toolCalls),
-              cancellationToken,
-            ),
-          ]);
+          const [fallbackInputTokens, outputTokens] =
+            await requestLifecycle.waitFor(
+              Promise.all([
+                client.countTokens(
+                  JSON.stringify(requestBody),
+                  cancellationToken,
+                ),
+                client.countTokens(
+                  accumulatedText + JSON.stringify(toolCalls),
+                  cancellationToken,
+                ),
+              ]),
+            );
           inputTokens = fallbackInputTokens;
           responseUsage = {
             input_tokens: fallbackInputTokens,
-            input_tokens_details: { cached_tokens: 0 },
+            input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
             output_tokens: outputTokens,
             output_tokens_details: { reasoning_tokens: 0 },
             total_tokens: fallbackInputTokens + outputTokens,
@@ -334,10 +460,10 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
         logger.debug("/v1/responses response:");
         logger.debug(JSON.stringify(responseObj, null, 2));
         logger.info(
-          `← /v1/responses | input: ${responseUsage.input_tokens} | cache_read: ${responseUsage.input_tokens_details.cached_tokens} | output: ${responseUsage.output_tokens}`,
+          `← /v1/responses | input: ${responseUsage?.input_tokens} | cache_read: ${responseUsage?.input_tokens_details?.cached_tokens} | output: ${responseUsage?.output_tokens}`,
         );
 
-        cancellationTokenSource.dispose();
+        requestLifecycle.dispose();
         return c.json(responseObj);
       }
 
@@ -348,6 +474,9 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           const responseId = generateResponseId();
           const createdAt = getCurrentTimestamp();
           const sequenceNumberRef = { value: 0 };
+          const writeSSE = (
+            message: Parameters<typeof sseStream.writeSSE>[0],
+          ) => requestLifecycle!.waitFor(sseStream.writeSSE(message));
 
           // Build base response object
           const baseResponse = {
@@ -380,7 +509,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           });
 
           // Emit response.created
-          await sseStream.writeSSE({
+          await writeSSE({
             event: "response.created",
             data: JSON.stringify({
               type: "response.created",
@@ -390,7 +519,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           });
 
           // Emit response.in_progress
-          await sseStream.writeSSE({
+          await writeSSE({
             event: "response.in_progress",
             data: JSON.stringify({
               type: "response.in_progress",
@@ -408,14 +537,27 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           let totalOutputText = ""; // Track all output for token counting
           let responseUsage: ResponseUsage | undefined;
 
-          for await (const chunk of response.stream) {
+          for await (const chunk of withSseHeartbeat(
+            interruptibleLanguageModelStream(
+              response.stream,
+              requestLifecycle!,
+            ),
+            options.heartbeatIntervalMs,
+          )) {
+            if (chunk === SSE_HEARTBEAT) {
+              await requestLifecycle!.waitFor(
+                sseStream.write(": keep-alive\n\n"),
+              );
+              continue;
+            }
+
             if (chunk instanceof vscode.LanguageModelTextPart) {
               if (!currentMessageId) {
                 // Start new message output item
                 currentMessageId = generateMessageId();
                 contentIndex = 0;
 
-                await sseStream.writeSSE({
+                await writeSSE({
                   event: "response.output_item.added",
                   data: JSON.stringify({
                     type: "response.output_item.added",
@@ -431,7 +573,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
                   }),
                 });
 
-                await sseStream.writeSSE({
+                await writeSSE({
                   event: "response.content_part.added",
                   data: JSON.stringify({
                     type: "response.content_part.added",
@@ -447,7 +589,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
               // Emit text delta
               accumulatedText += chunk.value;
               totalOutputText += chunk.value;
-              await sseStream.writeSSE({
+              await writeSSE({
                 event: "response.output_text.delta",
                 data: JSON.stringify({
                   type: "response.output_text.delta",
@@ -462,7 +604,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
               // Close current message if open
               if (currentMessageId) {
                 const outputItem = await closeMessageOutputItem(
-                  sseStream,
+                  writeSSE,
                   currentMessageId,
                   outputIndex,
                   contentIndex,
@@ -475,13 +617,86 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
                 accumulatedText = "";
               }
 
+              totalOutputText += JSON.stringify(chunk);
+
+              const toolInfo = toolMap.get(chunk.name);
+              const toolName = toolInfo?.name ?? chunk.name;
+              const toolNamespace = toolInfo?.namespace;
+
+              if (toolInfo?.isCustom) {
+                // Emit custom tool call events (raw string input, no JSON args)
+                const ctcId = generateCustomToolCallId();
+                const callId = chunk.callId;
+                const inputStr = customToolCallInput(chunk.input);
+
+                await writeSSE({
+                  event: "response.output_item.added",
+                  data: JSON.stringify({
+                    type: "response.output_item.added",
+                    output_index: outputIndex,
+                    item: {
+                      type: "custom_tool_call",
+                      id: ctcId,
+                      call_id: callId,
+                      name: toolName,
+                      input: "",
+                      ...(toolNamespace ? { namespace: toolNamespace } : {}),
+                    },
+                    sequence_number: sequenceNumberRef.value++,
+                  }),
+                });
+
+                await writeSSE({
+                  event: "response.custom_tool_call_input.delta",
+                  data: JSON.stringify({
+                    type: "response.custom_tool_call_input.delta",
+                    item_id: ctcId,
+                    output_index: outputIndex,
+                    delta: inputStr,
+                    sequence_number: sequenceNumberRef.value++,
+                  }),
+                });
+
+                await writeSSE({
+                  event: "response.custom_tool_call_input.done",
+                  data: JSON.stringify({
+                    type: "response.custom_tool_call_input.done",
+                    item_id: ctcId,
+                    output_index: outputIndex,
+                    input: inputStr,
+                    sequence_number: sequenceNumberRef.value++,
+                  }),
+                });
+
+                output.push({
+                  type: "custom_tool_call",
+                  id: ctcId,
+                  call_id: callId,
+                  name: toolName,
+                  input: inputStr,
+                  ...(toolNamespace ? { namespace: toolNamespace } : {}),
+                });
+
+                await writeSSE({
+                  event: "response.output_item.done",
+                  data: JSON.stringify({
+                    type: "response.output_item.done",
+                    output_index: outputIndex,
+                    item: output[outputIndex],
+                    sequence_number: sequenceNumberRef.value++,
+                  }),
+                });
+
+                outputIndex++;
+                continue;
+              }
+
               // Emit function call events
               const fcId = generateFunctionCallId();
               const callId = chunk.callId;
               const argsStr = JSON.stringify(chunk.input ?? {});
-              totalOutputText += JSON.stringify(chunk);
 
-              await sseStream.writeSSE({
+              await writeSSE({
                 event: "response.output_item.added",
                 data: JSON.stringify({
                   type: "response.output_item.added",
@@ -490,15 +705,16 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
                     type: "function_call",
                     id: fcId,
                     call_id: callId,
-                    name: chunk.name,
+                    name: toolName,
                     arguments: "",
                     status: "in_progress",
+                    ...(toolNamespace ? { namespace: toolNamespace } : {}),
                   },
                   sequence_number: sequenceNumberRef.value++,
                 }),
               });
 
-              await sseStream.writeSSE({
+              await writeSSE({
                 event: "response.function_call_arguments.delta",
                 data: JSON.stringify({
                   type: "response.function_call_arguments.delta",
@@ -509,7 +725,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
                 }),
               });
 
-              await sseStream.writeSSE({
+              await writeSSE({
                 event: "response.function_call_arguments.done",
                 data: JSON.stringify({
                   type: "response.function_call_arguments.done",
@@ -524,12 +740,13 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
                 type: "function_call",
                 id: fcId,
                 call_id: callId,
-                name: chunk.name,
+                name: toolName,
                 arguments: argsStr,
                 status: "completed",
+                ...(toolNamespace ? { namespace: toolNamespace } : {}),
               });
 
-              await sseStream.writeSSE({
+              await writeSSE({
                 event: "response.output_item.done",
                 data: JSON.stringify({
                   type: "response.output_item.done",
@@ -549,7 +766,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           // Close any remaining message
           if (currentMessageId) {
             const outputItem = await closeMessageOutputItem(
-              sseStream,
+              writeSSE,
               currentMessageId,
               outputIndex,
               contentIndex,
@@ -561,17 +778,20 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           }
 
           if (!responseUsage) {
-            const [fallbackInputTokens, outputTokens] = await Promise.all([
-              client.countTokens(
-                JSON.stringify(requestBody),
-                cancellationToken,
-              ),
-              client.countTokens(totalOutputText, cancellationToken),
-            ]);
+            const [fallbackInputTokens, outputTokens] =
+              await requestLifecycle!.waitFor(
+                Promise.all([
+                  client.countTokens(
+                    JSON.stringify(requestBody),
+                    cancellationToken,
+                  ),
+                  client.countTokens(totalOutputText, cancellationToken),
+                ]),
+              );
             inputTokens = fallbackInputTokens;
             responseUsage = {
               input_tokens: fallbackInputTokens,
-              input_tokens_details: { cached_tokens: 0 },
+              input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
               output_tokens: outputTokens,
               output_tokens_details: { reasoning_tokens: 0 },
               total_tokens: fallbackInputTokens + outputTokens,
@@ -579,7 +799,7 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           }
 
           // Emit response.completed
-          await sseStream.writeSSE({
+          await writeSSE({
             event: "response.completed",
             data: JSON.stringify({
               type: "response.completed",
@@ -594,43 +814,78 @@ export function registerOpenaiResponsesRoutes(app: OpenAPIHono) {
           });
 
           logger.info(
-            `← /v1/responses (stream) | input: ${responseUsage.input_tokens} | cache_read: ${responseUsage.input_tokens_details.cached_tokens} | output: ${responseUsage.output_tokens}`,
+            `← /v1/responses (stream) | input: ${responseUsage?.input_tokens} | cache_read: ${responseUsage?.input_tokens_details?.cached_tokens} | cache_write: ${responseUsage?.input_tokens_details?.cache_write_tokens} | output: ${responseUsage?.output_tokens}`,
           );
-          cancellationTokenSource?.dispose();
+          requestLifecycle?.dispose();
         },
         async (error, sseStream) => {
+          if (error instanceof LanguageModelClientDisconnectedError) {
+            logger.info("/v1/responses | client disconnected");
+            requestLifecycle?.dispose();
+            await sseStream.close();
+            return;
+          }
+
           logger.error("✕ /v1/responses (stream) |", error);
-          cancellationTokenSource?.dispose();
 
           const responseId = generateResponseId();
           const createdAt = getCurrentTimestamp();
 
-          await sseStream.writeSSE({
-            event: "response.failed",
-            data: JSON.stringify({
-              type: "response.failed",
-              response: {
-                id: responseId,
-                object: "response",
-                status: "failed",
-                created_at: createdAt,
-                model: model,
-                output: [],
-                error: {
-                  code: "server_error",
-                  message:
-                    error instanceof Error ? error.message : String(error),
+          try {
+            await sseStream.writeSSE({
+              event: "response.failed",
+              data: JSON.stringify({
+                type: "response.failed",
+                response: {
+                  id: responseId,
+                  object: "response",
+                  status: "failed",
+                  created_at: createdAt,
+                  model: model,
+                  output: [],
+                  error: {
+                    code:
+                      error instanceof LanguageModelRequestTimeoutError
+                        ? "request_timeout"
+                        : "server_error",
+                    message:
+                      error instanceof Error ? error.message : String(error),
+                  },
+                  incomplete_details: null,
+                  usage: null,
+                  metadata,
                 },
-                incomplete_details: null,
-                usage: null,
-                metadata,
-              },
-            }),
-          });
+              }),
+            });
+          } finally {
+            requestLifecycle?.dispose();
+            await sseStream.close();
+          }
         },
       );
     } catch (error) {
-      cancellationTokenSource?.dispose();
+      requestLifecycle?.dispose();
+
+      if (error instanceof LanguageModelRequestTimeoutError) {
+        logger.error("✕ /v1/responses |", error);
+        return c.json(
+          {
+            error: {
+              type: "timeout_error",
+              message: error.message,
+              param: null,
+              code: "request_timeout",
+            },
+          },
+          504,
+        );
+      }
+
+      if (error instanceof LanguageModelClientDisconnectedError) {
+        logger.info("/v1/responses | client disconnected");
+        return new Response(null, { status: 499 });
+      }
+
       logger.error("✕ /v1/responses |", error);
 
       const logFilePath = await handleErrorWithLogging({

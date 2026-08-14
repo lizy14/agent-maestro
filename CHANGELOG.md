@@ -1,5 +1,30 @@
 # Changelog
 
+## v2.11.1 - 2026.07.17
+
+- Add `Configure Claude Desktop Settings` command to point Claude Desktop at the Agent Maestro proxy.
+
+## v2.11.0 - 2026.07.15
+
+- Add experimental commands that patch the currently loaded Copilot Chat bundle to append the OpenAI web search tool declaration for supported GPT-5 Codex requests, and restore backups created by that patch. Tested with `ChatGPT 26.707.72221`: `GPT-5.4` and `GPT-5.5` work; `GPT-5.6` does not yet forward the web search tool declaration to the server.
+- Preserve Codex custom tool source input when proxying OpenAI Responses tool calls.
+- Cancel stalled Anthropic and OpenAI language model requests after ten minutes or when clients disconnect.
+
+## v2.10.0 - 2026.07.10
+
+- Add support for OpenAI Responses API `additional_tools`, `custom`, and `namespace` tools, enabling GPT-5.6 and Codex tool calling through Agent Maestro. Custom tool calls now preserve raw string input, and named `tool_choice` requests are enforced.
+- Remove the GitHub Copilot Chat header fixer command because current VS Code builds ship Copilot Chat as a built-in extension, making the old user-extension patch path obsolete.
+
+## v2.9.7 - 2026.07.04
+
+- Fix Anthropic tool-result images being rejected as a media-type mismatch when large JPEG/GIF/WebP bytes were relabeled as PNG. Top-level image parts still keep the VS Code resize workaround, while nested tool-result images now preserve their declared media type.
+- Stop showing an MCP startup notification during extension activation when no Roo-compatible task manager is available.
+
+## v2.9.6 - 2026.06.23
+
+- Forward reasoning effort settings to Copilot for OpenAI and Anthropic proxy requests. OpenAI-backed models apply the setting today; Claude/Anthropic requests forward it but require upstream Copilot support to take effect.
+- Fix images sent to Copilot vision models being rejected as a media-type mismatch (e.g. "specified image/jpeg, but the image appears to be image/png"). The VS Code Language Model API re-encodes images to PNG when both dimensions exceed 768px without updating their declared MIME type; Agent Maestro now relabels affected images so the type matches the bytes. Applies to the Anthropic, OpenAI Chat, OpenAI Responses, and Gemini routes.
+
 ## v2.9.5 - 2026.06.10
 
 - Fix Claude Code 1M model routing to preserve requested model IDs instead of rewriting them to synthetic internal Copilot variants.

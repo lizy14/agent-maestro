@@ -49,6 +49,10 @@ This automatically creates or updates `.claude/settings.json` with Agent Maestro
 
 > **1M Context Support**: Agent Maestro supports Claude 1M context models (e.g. `claude-opus-4.7-1m-internal`). To use the extended context window, run `Agent Maestro: Configure Claude Code Settings` and select the desired 1M model. Agent Maestro writes the model in the format Claude Code expects so the 1M path is selected consistently.
 
+### One-Click Setup for Claude Desktop
+
+Configure Claude Desktop to use Agent Maestro's Anthropic-compatible proxy with `Agent Maestro: Configure Claude Desktop Settings` via Command Palette. The command creates or updates the local third-party inference configuration for macOS, Windows, or Linux. Fully quit and reopen Claude Desktop after configuring it.
+
 ### One-Click Setup for Codex
 
 Configure Codex to use VS Code's language models with a single command `Agent Maestro: Configure Codex Settings` via Command Palette.
@@ -83,19 +87,23 @@ Additionally, it creates or updates `settings.json` in the same folder to skip t
 }
 ```
 
-### GitHub Copilot Chat Model Enhancement
+### Experimental GPT-5+ Web Search Patch
 
-Enable additional models in GitHub Copilot Chat with the `Agent Maestro: Fix GitHub Copilot Chat - Model is not supported error` command. ([ref](https://github.com/cline/cline/issues/2186#issuecomment-2727010228))
+Run `Agent Maestro: Enable Experimental GPT-5+ Web Search` to patch the built-in Copilot bundle for the currently running VS Code app and append the server-side web search tool from GPT-5+ OpenAI Responses requests.
 
-This feature:
+This command:
 
-- Automatically locates your GitHub Copilot Chat extension
-- Creates a timestamped backup before making changes
-- Removes the `x-onbehalf-extension-id` header restriction
-- Verifies the fix was applied successfully
-- Prompts you to reload VS Code for changes to take effect
+- Uses the currently loaded GitHub Copilot Chat extension bundle, including Extension Development Host bundles; falls back to the current VS Code app root when needed
+- Creates a timestamped backup before writing changes
+- Enables `agent-maestro.experimentalGpt5PlusWebSearchEnabled` so OpenAI Responses requests that include web search tools can signal the patched Copilot bundle
+- Applies the patch only once when the expected Copilot bundle shape is found
+- Reloads VS Code after the patch is applied
 
-**Note**: This modification may be overwritten when the Copilot Chat extension updates. Simply run the command again after updates if needed.
+To undo the local patch, run `Agent Maestro: Restore Experimental GPT-5+ Web Search Backup`, choose one of the backups created for the currently loaded Copilot bundle, and Agent Maestro will restore it, disable `agent-maestro.experimentalGpt5PlusWebSearchEnabled`, and reload VS Code.
+
+This is an experimental local modification. Agent Maestro only injects the web search tool declaration from the OpenAI Responses request, following the [OpenAI web search tool guide](https://developers.openai.com/api/docs/guides/tools-web-search); actual availability, behavior, and errors depend on the active Copilot model backend. VS Code updates can overwrite this patch.
+
+See [docs/experimental-gpt5-plus-web-search.md](docs/experimental-gpt5-plus-web-search.md) for implementation details, restore behavior, and troubleshooting notes.
 
 ### Usage
 
@@ -124,9 +132,11 @@ This feature:
    **Configuration Commands:**
 
    - `Agent Maestro: Configure Claude Code Settings` - One-click Claude Code setup
+   - `Agent Maestro: Configure Claude Desktop Settings` - One-click Claude Desktop setup
    - `Agent Maestro: Configure Codex Settings` - One-click Codex setup
    - `Agent Maestro: Configure Gemini CLI Settings` - One-click Gemini CLI setup
-   - `Agent Maestro: Fix GitHub Copilot Chat - Model is not supported error` - Remove header restriction to enable additional models
+   - `Agent Maestro: Enable Experimental GPT-5+ Web Search` - Patch the current VS Code Copilot bundle to append web search for GPT major version 5 or newer model requests
+   - `Agent Maestro: Restore Experimental GPT-5+ Web Search Backup` - Restore a Copilot bundle backup created by the experimental patch command
    - `Agent Maestro: Set LLM API Key` - Configure authentication for LLM API endpoints
 
 3. **Development Resources**:
@@ -265,6 +275,8 @@ Perfect for Codex and OpenAI model integration:
 
 - **`POST /api/openai/v1/chat/completions`** - OpenAI Chat Completions API compatibility using VS Code's Language Model API
 - **`POST /api/openai/v1/responses`** - OpenAI Responses API compatibility using VS Code's Language Model API
+
+Anthropic Messages and both OpenAI endpoints cancel the upstream language model request when the client disconnects or when the request remains unfinished for 10 minutes. Non-streaming timeouts return HTTP 504; streaming timeouts use each protocol's error event instead of a successful completion event.
 
 ### Gemini-Compatible Endpoints
 

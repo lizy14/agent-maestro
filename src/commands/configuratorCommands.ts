@@ -11,12 +11,21 @@ import {
   ensureClaudeConfigExists,
   ensureClaudeOnboardingComplete,
 } from "../utils/claude";
+import {
+  createClaudeDesktopGatewayConfig,
+  getClaudeDesktopConfigDirectory,
+  updateClaudeDesktopMetadata,
+} from "../utils/claudeDesktop";
+import {
+  createDshManagedBlock,
+  getDshSettingsPath,
+  updateDshSettingsContent,
+} from "../utils/dshSettings";
 import { logger } from "../utils/logger";
 import { updateEnvFile } from "../utils/updateEnvFile";
 import { createCommandHandler } from "./commandHandler";
 
 const LOOPBACK_HOST = "127.0.0.1";
-
 export function registerConfiguratorCommands(
   proxy: ProxyServer,
   context: vscode.ExtensionContext,
@@ -192,6 +201,87 @@ export function registerConfiguratorCommands(
     ),
 
     vscode.commands.registerCommand(
+      "agent-maestro.configureClaudeDesktop",
+      createCommandHandler(async () => {
+        const configDirectory = getClaudeDesktopConfigDirectory();
+        const metadataPath = path.join(configDirectory, "_meta.json");
+        let metadata: {
+          appliedId?: string;
+          entries?: Array<{ id: string; name: string }>;
+        } = {};
+
+        try {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            vscode.window.showErrorMessage(
+              `Failed to read Claude Desktop metadata: ${(error as Error).message}`,
+            );
+            return;
+          }
+        }
+
+        const updatedMetadata = updateClaudeDesktopMetadata(metadata);
+        const settingsPath = path.join(
+          configDirectory,
+          `${updatedMetadata.appliedId}.json`,
+        );
+        let existingSettings: Record<string, unknown> = {};
+        let fileExists = false;
+
+        try {
+          existingSettings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+          fileExists = true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            vscode.window.showErrorMessage(
+              `Failed to read Claude Desktop settings: ${(error as Error).message}`,
+            );
+            return;
+          }
+        }
+
+        if (fileExists) {
+          const shouldOverride = await vscode.window.showQuickPick(
+            ["Yes", "No"],
+            {
+              title: "Claude Desktop Settings Found",
+              placeHolder:
+                "Settings already exist for Agent Maestro. Do you want to update them?",
+            },
+          );
+
+          if (shouldOverride !== "Yes") {
+            return;
+          }
+        }
+
+        const proxyPort = proxy.getStatus().port;
+        const updatedSettings = {
+          ...existingSettings,
+          ...createClaudeDesktopGatewayConfig(proxyPort),
+        };
+
+        fs.mkdirSync(configDirectory, { recursive: true });
+        fs.writeFileSync(
+          settingsPath,
+          JSON.stringify(updatedSettings, null, 2),
+        );
+        fs.writeFileSync(
+          metadataPath,
+          JSON.stringify(updatedMetadata, null, 2),
+        );
+
+        vscode.window.showInformationMessage(
+          `Claude Desktop settings ${fileExists ? "updated" : "created"} successfully! Fully quit and reopen Claude Desktop to apply the Agent Maestro proxy configuration.`,
+        );
+        logger.info(
+          `Claude Desktop settings ${fileExists ? "updated" : "created"}: ${settingsPath}`,
+        );
+      }, "Failed to configure Claude Desktop settings"),
+    ),
+
+    vscode.commands.registerCommand(
       "agent-maestro.configureCodex",
       createCommandHandler(async () => {
         const codexConfigPath = path.join(
@@ -317,6 +407,87 @@ export function registerConfiguratorCommands(
           await vscode.commands.executeCommand("workbench.action.reloadWindow");
         }
       }, "Failed to configure Codex settings"),
+    ),
+
+    vscode.commands.registerCommand(
+      "agent-maestro.configureDsh",
+      createCommandHandler(async () => {
+        const dshSettingsPath = getDshSettingsPath();
+
+        let existingContent = "";
+        let fileExists = false;
+        try {
+          existingContent = fs.readFileSync(dshSettingsPath, "utf8");
+          fileExists = true;
+
+          const shouldOverride = await vscode.window.showQuickPick(
+            ["Yes", "No"],
+            {
+              title: "DSH Settings Found",
+              placeHolder:
+                "Choose Yes to update the Agent Maestro managed block, or No / Esc to cancel.",
+            },
+          );
+
+          if (shouldOverride !== "Yes") {
+            return;
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            vscode.window.showErrorMessage(
+              `Failed to read DSH settings: ${(error as Error).message}`,
+            );
+            return;
+          }
+        }
+
+        const modelOptions = await getChatModelsQuickPickItems({
+          recommendedModelId: "gpt-5.5",
+          priorityFamily: "openai",
+        });
+
+        if (modelOptions.length === 0) {
+          vscode.window.showErrorMessage(
+            "No available chat model provided by VS Code LM API.",
+          );
+          return;
+        }
+
+        const selectedModel = await vscode.window.showQuickPick(modelOptions, {
+          title: "Select model",
+          placeHolder: "Choose which model to use with DSH",
+        });
+
+        if (!selectedModel?.modelId) {
+          return;
+        }
+
+        const proxyPort = proxy.getStatus().port;
+        const managedBlock = createDshManagedBlock({
+          baseURL: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1`,
+          modelId: selectedModel.modelId,
+          modelContextWindow: selectedModel.maxInputTokens ?? undefined,
+        });
+        const update = updateDshSettingsContent(existingContent, managedBlock);
+
+        if (update.blockedByExistingLlmPiAi) {
+          vscode.window.showErrorMessage(
+            "DSH settings contain a conflicting or incomplete llm-pi-ai section. Please repair or remove it before running this command again.",
+          );
+          return;
+        }
+
+        fs.mkdirSync(path.dirname(dshSettingsPath), { recursive: true });
+        fs.writeFileSync(dshSettingsPath, update.content);
+
+        vscode.window.showInformationMessage(
+          `DSH settings ${fileExists ? "updated" : "created"} successfully! Set AGENT_MAESTRO_API_KEY to the Agent Maestro LLM API key, or any non-empty placeholder if authentication is disabled.`,
+        );
+
+        logger.info(
+          `DSH settings ${fileExists ? "updated" : "created"}: ${dshSettingsPath}`,
+        );
+      }, "Failed to configure DSH settings"),
     ),
 
     vscode.commands.registerCommand(
