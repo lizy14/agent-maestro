@@ -124,6 +124,14 @@ This automatically creates or updates both `.codebuddy/models.json` and `.workbu
 }
 ```
 
+## New-model notifications
+
+Agent Maestro listens for VS Code Language Model API model-registration changes across **all vendors**, including Copilot. The first successful inventory is a silent baseline; newly observed `(vendor, model ID)` pairs trigger a confirmation popup when existing DSH, CodeBuddy or WorkBuddy catalogs can be extended. No model request is sent to test availability, and no absent client configuration is created.
+
+Choose **Update model lists** to append missing models to already populated Maestro catalogs. Existing defaults, model customizations, credentials, endpoints and unrelated settings are retained. Each changed file is backed up; files edited during the prompt or with unsaved editor changes are skipped. DSH requires its generated managed model section; ambiguous/unmanaged YAML is offered for manual review. Dismissal makes no changes. User and open-workspace Buddy files, initialized DSH profiles and recorded setup targets are checked.
+
+Copilot IDs keep their existing names. Other vendors use stable `vscode-lm-`-qualified IDs so two providers offering the same raw ID cannot be routed accidentally to each other. The proxy resolves these IDs back to the original provider model; unknown qualified IDs fail rather than falling back. Model registration/capabilities do not guarantee hosted quota, authorization, vision or tool behavior. The prompt does not alter Claude Code, Codex or Gemini CLI configurations; see [client catalog investigation](docs/client-model-catalogs.md).
+
 ## Web Search
 
 Search is available when a supported client requests it. AM does not add search to every prompt.

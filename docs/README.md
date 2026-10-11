@@ -4,6 +4,8 @@ Start with the [project README](../README.md) for installation and client setup.
 
 ## Current Guides
 
+- [Client model catalogs](client-model-catalogs.md): investigated custom-list and gateway-discovery support in Claude Code, Codex and Gemini CLI.
+
 - [DSH / DSH Desktop setup](dsh-setup.md): complete model catalog, model picker, credentials, safe Cordis patch updates, and troubleshooting.
 
 | Guide                                                    | Use it for                                                                             |

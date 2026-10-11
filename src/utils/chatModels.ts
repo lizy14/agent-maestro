@@ -2,13 +2,20 @@ import * as vscode from "vscode";
 
 import { readConfiguration } from "./config";
 import { logger } from "./logger";
+import {
+  isQualifiedModelId,
+  modelRouteId,
+  resolveQualifiedModel,
+} from "./modelIdentity";
 
 const SUPPORTED_VENDOR = "copilot";
 const warnedUnavailableFallbackModelIds = new Set<string>();
 
-async function selectSupportedModels(): Promise<vscode.LanguageModelChat[]> {
-  const allModels = await vscode.lm.selectChatModels();
-  const supported = allModels.filter((m) => m.vendor === SUPPORTED_VENDOR);
+async function selectSupportedModels(
+  snapshot?: vscode.LanguageModelChat[],
+): Promise<vscode.LanguageModelChat[]> {
+  const allModels = snapshot ?? (await vscode.lm.selectChatModels());
+  const supported = allModels;
 
   const col = (s: string, w: number) =>
     s.length > w ? s.slice(0, w - 3) + "..." : s.padEnd(w);
@@ -16,7 +23,7 @@ async function selectSupportedModels(): Promise<vscode.LanguageModelChat[]> {
   const header = `  ${col("Proxy", colW.proxy)} ${col("Name", colW.name)} ${col("ID", colW.id)} ${col("Vendor", colW.vendor)} ${col("MaxInputTokens", colW.tokens)}`;
   const divider = `  ${"-".repeat(colW.proxy)} ${"-".repeat(colW.name)} ${"-".repeat(colW.id)} ${"-".repeat(colW.vendor)} ${"-".repeat(colW.tokens)}`;
   const rows = allModels.map((m) => {
-    const eligible = m.vendor === SUPPORTED_VENDOR;
+    const eligible = true;
     return `  ${col(`[${eligible ? "x" : " "}]`, colW.proxy)} ${col(m.name, colW.name)} ${col(m.id, colW.id)} ${col(m.vendor, colW.vendor)} ${m.maxInputTokens}`;
   });
   logger.info(
@@ -80,6 +87,9 @@ class ChatModelsCache {
   }
 
   async getChatModels(): Promise<vscode.LanguageModelChat[]> {
+    if (this.initializationPromise) {
+      await this.initializationPromise;
+    }
     if (this.cachedModels.length > 0) {
       return this.cachedModels;
     }
@@ -88,10 +98,23 @@ class ChatModelsCache {
     return this.cachedModels;
   }
 
-  async refresh(): Promise<void> {
-    this.cachedModels = [];
-    this.initializationPromise = null;
-    await this.initialize();
+  async refresh(snapshot?: vscode.LanguageModelChat[]): Promise<void> {
+    if (this.initializationPromise) {
+      await this.initializationPromise;
+      if (snapshot === undefined) {
+        return;
+      }
+      this.cachedModels = await selectSupportedModels(snapshot);
+      return;
+    }
+    this.initializationPromise = (async () => {
+      try {
+        this.cachedModels = await selectSupportedModels(snapshot);
+      } finally {
+        this.initializationPromise = null;
+      }
+    })();
+    await this.initializationPromise;
   }
 
   getCachedModels(): vscode.LanguageModelChat[] {
@@ -127,7 +150,7 @@ const chatModelToQuickPickItem = (
 ) => ({
   label: model.name,
   description: `${model.vendor} - ${model.id}`,
-  modelId: model.id,
+  modelId: modelRouteId(model),
   maxInputTokens: model.maxInputTokens,
   maxOutputTokens: model.maxOutputTokens,
   capabilities: model.capabilities,
@@ -397,26 +420,53 @@ function findBestMatch(
  * 3. Configured fallback model
  * 4. Fallback to "auto" or first available model
  *
- * Note: We don't refresh the cache if a model isn't found because vscode.lm.selectChatModels()
- * doesn't update dynamically when network state changes - the VS Code API returns the same
- * cached results regardless of VPN/network changes during the session.
+ * Model registration events refresh the cache. Requests do not trigger discovery.
+ * Qualified vendor routes require exact matches; legacy fuzzy routing stays Copilot-only.
  */
 export const getChatModelClient = async (modelId: string) => {
   const models = await chatModelsCache.getChatModels();
 
-  let client = models.find((model) => model.id === modelId);
+  if (isQualifiedModelId(modelId)) {
+    const qualified = resolveQualifiedModel(modelId, models);
+    return qualified
+      ? { client: qualified }
+      : {
+          error: {
+            error: {
+              message: `Qualified VS Code model '${modelId}' is unavailable`,
+              type: "invalid_request_error",
+            },
+          },
+        };
+  }
+  const matches = models.filter((model) => model.id === modelId);
+  let client = matches.find((model) => model.vendor === SUPPORTED_VENDOR);
+  if (!client && new Set(matches.map((model) => model.vendor)).size > 1) {
+    return {
+      error: {
+        error: {
+          message: `Model '${modelId}' is ambiguous; use its qualified VS Code route ID`,
+          type: "invalid_request_error",
+        },
+      },
+    };
+  }
+  client ??= matches[0];
   if (client) {
     return { client };
   }
 
-  const fuzzyMatch = findBestMatch(modelId, models);
+  const fuzzyMatch = findBestMatch(
+    modelId,
+    models.filter((model) => model.vendor === SUPPORTED_VENDOR),
+  );
   if (fuzzyMatch) {
     return { client: fuzzyMatch };
   }
 
   const fallbackModelId = readConfiguration().fallbackModelId.trim();
   if (fallbackModelId) {
-    client = models.find((model) => model.id === fallbackModelId);
+    client = models.find((model) => modelRouteId(model) === fallbackModelId);
     if (client) {
       warnedUnavailableFallbackModelIds.delete(fallbackModelId);
       logger.info(
