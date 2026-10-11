@@ -713,12 +713,16 @@ export function registerConfiguratorCommands(
             };
           },
         );
+        // Drop any pre-existing `availableModels` whitelist. Agent Maestro only
+        // contributes custom models; we must never restrict the model list to
+        // just them, or the app's built-in models get filtered out. Spreading
+        // `existingConfig` would otherwise carry over a stale whitelist.
+        const { availableModels: _ignored, ...existingConfigWithoutWhitelist } =
+          existingConfig;
+        void _ignored;
         const updatedConfig: WorkBuddyModelsFileConfig = {
-          ...existingConfig,
+          ...existingConfigWithoutWhitelist,
           models: updatedModelsWithSuffixedNames,
-          availableModels: updatedModelsWithSuffixedNames.map(
-            (model) => model.id,
-          ),
         };
 
         const serializedConfig = JSON.stringify(updatedConfig, null, 2);
