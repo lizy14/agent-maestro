@@ -4,7 +4,7 @@
 [![Visual Studio Marketplace downloads](https://badgen.net/vs-marketplace/d/Joouis.agent-maestro)](https://marketplace.visualstudio.com/items?itemName=Joouis.agent-maestro)
 [![Visual Studio Marketplace rating](https://badgen.net/vs-marketplace/rating/Joouis.agent-maestro)](https://marketplace.visualstudio.com/items?itemName=Joouis.agent-maestro)
 
-Use your preferred coding client with the GitHub Copilot models available in VS Code. Agent Maestro provides a local API bridge for Claude Code, Claude Desktop, Codex, Gemini CLI, and other compatible clients. Model requests use VS Code's Copilot connection and remain subject to your account's model access and usage limits.
+Use your preferred coding client with the GitHub Copilot models available in VS Code. Agent Maestro provides a local API bridge for Claude Code, Claude Desktop, Codex, Gemini CLI, CodeBuddy / WorkBuddy, and other compatible clients. Model requests use VS Code's Copilot connection and remain subject to your account's model access and usage limits.
 
 For automation, Agent Maestro also exposes Roo Code tasks through REST and MCP: start work, follow progress, and respond to tool approvals from another application. Cline integration currently supports basic task creation.
 
@@ -12,7 +12,7 @@ For automation, Agent Maestro also exposes Roo Code tasks through REST and MCP: 
 
 ## Features
 
-- **Choose your client and model.** Connect through Anthropic Messages, OpenAI Chat Completions/Responses, or Gemini-compatible endpoints, with setup commands for four clients and a picker of available Copilot models.
+- **Choose your client and model.** Connect through Anthropic Messages, OpenAI Chat Completions/Responses, or Gemini-compatible endpoints, with setup commands including CodeBuddy / WorkBuddy and a picker of available Copilot models.
 - **Work with tools and images.** Supported tool histories and image inputs are converted to VS Code messages. Ordinary client tools still execute in the client; AM does not run them on its behalf.
 - **Search for current information.** Exa-backed search supports declared Anthropic/Responses web-search tools and experimental Codex standalone search, with source links and protocol-specific limits.
 - **Configure longer conversations.** Claude Code and Codex setup uses the selected model's advertised context window. Streaming heartbeats keep supported clients connected while a response is pending.
@@ -73,6 +73,44 @@ Reply with exactly AM_CONNECTED. Do not read files or use tools.
 Look for the reply **and** the matching request in VS Code's **Output → Agent Maestro** channel. AM logs an incoming request with its resolved model and a completion with token usage; this confirms the client used the proxy rather than another configured provider. The prompt is a smoke check, not a guarantee of exact model output.
 
 Once connected, try a normal task such as explaining a function in your project. Requests consume model quota, and any tool approvals remain part of the client workflow. If the check fails, see [troubleshooting](#troubleshooting-and-diagnostics). Direct API users can use the [complete request examples](docs/llm-compatibility.md#request-examples).
+
+### One-Click Setup for CodeBuddy / WorkBuddy
+
+Configure CodeBuddy / WorkBuddy to use VS Code's language models with a single command `Agent Maestro: Configure CodeBuddy / WorkBuddy Settings` via Command Palette.
+
+You can choose between:
+
+- **User Settings** (`~/.codebuddy/models.json` and `~/.workbuddy/models.json`): Personal global settings for all projects
+- **Project Settings** (`<workspace>/.codebuddy/models.json` and `<workspace>/.workbuddy/models.json`): Project-specific settings
+
+This automatically creates or updates both `.codebuddy/models.json` and `.workbuddy/models.json` with all proxy-eligible VS Code chat models, each routed to Agent Maestro's OpenAI-compatible endpoint. Only the `models` array is written — `availableModels` is intentionally **not** written, so the host app's built-in models stay selectable (writing it as a whitelist of only these custom IDs would hide the built-in models). Capability flags such as `supportsToolCall` and `supportsImages` are derived from the model metadata returned by the VS Code LM API/Copilot runtime:
+
+```json
+{
+  "models": [
+    {
+      "id": "gpt-5.5",
+      "name": "GPT-5.5 (Agent Maestro)",
+      "vendor": "OpenAI",
+      "apiKey": "Powered by Agent Maestro",
+      "maxInputTokens": 272000,
+      "url": "http://127.0.0.1:23333/api/openai/v1/chat/completions",
+      "supportsToolCall": true,
+      "supportsImages": true
+    },
+    {
+      "id": "claude-sonnet-4",
+      "name": "Claude Sonnet 4 (Agent Maestro)",
+      "vendor": "OpenAI",
+      "apiKey": "Powered by Agent Maestro",
+      "maxInputTokens": 200000,
+      "url": "http://127.0.0.1:23333/api/openai/v1/chat/completions",
+      "supportsToolCall": true,
+      "supportsImages": true
+    }
+  ]
+}
+```
 
 ## Web Search
 
