@@ -21,6 +21,7 @@ suite("Config Test Suite", () => {
       assert.strictEqual(DEFAULT_CONFIG.mcpServerPort, 23334);
       assert.strictEqual(DEFAULT_CONFIG.allowOutsideWorkspaceAccess, false);
       assert.strictEqual(DEFAULT_CONFIG.fallbackModelId, "");
+      assert.strictEqual(DEFAULT_CONFIG.suppressNoClaudeModelsWarning, false);
     });
   });
 

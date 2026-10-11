@@ -85,6 +85,12 @@
           "description": "Allow the extension to access files outside of the current workspace",
           "scope": "application"
         },
+        "agent-maestro.suppressNoClaudeModelsWarning": {
+          "type": "boolean",
+          "default": false,
+          "description": "Suppress the warning when no Claude models are reported by the VS Code Language Model API.",
+          "scope": "application"
+        },
         "agent-maestro.fallbackModelId": {
           "type": "string",
           "default": "",

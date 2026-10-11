@@ -140,6 +140,8 @@ Searches can use Exa's anonymous allowance, including domain, recency, country, 
 
 These paths have different contracts: Gemini has no hosted-search integration here, and not every native search option or Codex web command is supported. See [search compatibility and supported Codex versions](docs/llm-compatibility.md#web-search).
 
+To disable the missing-Claude popup, set `"agent-maestro.suppressNoClaudeModelsWarning": true` in VS Code **User** settings. The default is `false`; this controls only that warning, not model discovery or routing.
+
 ## Models and Context Windows
 
 - **Claude Code:** Setup writes the selected model's compaction window and defaults the compaction threshold to 85% unless you already set one. For the supported 1M tier, it adds the client-side `[1m]` marker.

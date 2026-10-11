@@ -7,6 +7,7 @@ export interface AgentMaestroConfiguration {
   mcpServerPort: number;
   allowOutsideWorkspaceAccess: boolean;
   fallbackModelId: string;
+  suppressNoClaudeModelsWarning: boolean;
 }
 
 /**
@@ -19,6 +20,8 @@ export const CONFIG_KEYS = {
   MCP_SERVER_PORT: "agent-maestro.mcpServerPort",
   ALLOW_OUTSIDE_WORKSPACE_ACCESS: "agent-maestro.allowOutsideWorkspaceAccess",
   FALLBACK_MODEL_ID: "agent-maestro.fallbackModelId",
+  SUPPRESS_NO_CLAUDE_MODELS_WARNING:
+    "agent-maestro.suppressNoClaudeModelsWarning",
 } as const;
 
 /**
@@ -31,6 +34,7 @@ export const DEFAULT_CONFIG: AgentMaestroConfiguration = {
   mcpServerPort: 23334,
   allowOutsideWorkspaceAccess: false,
   fallbackModelId: "",
+  suppressNoClaudeModelsWarning: false,
 };
 
 /**
@@ -59,6 +63,10 @@ export const readConfiguration = (): AgentMaestroConfiguration => {
     allowOutsideWorkspaceAccess: config.get<boolean>(
       CONFIG_KEYS.ALLOW_OUTSIDE_WORKSPACE_ACCESS,
       DEFAULT_CONFIG.allowOutsideWorkspaceAccess,
+    ),
+    suppressNoClaudeModelsWarning: config.get<boolean>(
+      CONFIG_KEYS.SUPPRESS_NO_CLAUDE_MODELS_WARNING,
+      DEFAULT_CONFIG.suppressNoClaudeModelsWarning,
     ),
     fallbackModelId: config.get<string>(
       CONFIG_KEYS.FALLBACK_MODEL_ID,

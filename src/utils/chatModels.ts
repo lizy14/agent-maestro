@@ -61,7 +61,10 @@ class ChatModelsCache {
           const hasClaudeModels = this.cachedModels.some((m) =>
             m.id.toLowerCase().includes("claude"),
           );
-          if (!hasClaudeModels) {
+          if (
+            !hasClaudeModels &&
+            !readConfiguration().suppressNoClaudeModelsWarning
+          ) {
             this.hasShownNoClaudeWarning = true;
             vscode.window.showWarningMessage(
               "No Claude models found. Please check your network or VPN settings.",
