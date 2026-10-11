@@ -10,7 +10,7 @@ import {
   hasPopulatedCatalog,
   writeCatalogUpdate,
 } from "./modelCatalogs";
-import { modelRouteId } from "./modelIdentity";
+import { modelNotificationLabel, modelRouteId } from "./modelIdentity";
 
 export const MODEL_SNAPSHOT_KEY = "agent-maestro.observedLanguageModels";
 export function modelIdentity(
@@ -76,6 +76,7 @@ export function registerModelCatalogWatcher(
         target: CatalogTarget;
         original: string;
         updated: string;
+        models: vscode.LanguageModelChat[];
       }[] = [];
       const manual: CatalogTarget[] = [];
       for (const target of findCatalogTargets(context)) {
@@ -93,7 +94,12 @@ export function registerModelCatalogWatcher(
               ),
             );
             if (updated !== original) {
-              snapshots.push({ target, original, updated });
+              const missing = supported.filter(
+                (model) =>
+                  additionsById.has(modelRouteId(model)) &&
+                  appendCatalogModels(target, original, [model]) !== original,
+              );
+              snapshots.push({ target, original, updated, models: missing });
             }
           } catch {
             if (additionsById.size) {
@@ -106,10 +112,24 @@ export function registerModelCatalogWatcher(
           );
         }
       }
-      const names = additions
+      const missingModels = [
+        ...new Map(
+          snapshots
+            .flatMap((snapshot) => snapshot.models)
+            .map((model) => [modelIdentity(model), model]),
+        ).values(),
+      ];
+      const shownModels = missingModels.length ? missingModels : additions;
+      const names = shownModels
         .slice(0, 4)
-        .map((model) => `${model.name} (${model.vendor})`)
+        .map(modelNotificationLabel)
         .join(", ");
+      const details = snapshots
+        .map(
+          (snapshot) =>
+            `${snapshot.target.path}\n  Add: ${snapshot.models.map(modelNotificationLabel).join(", ")}`,
+        )
+        .join("\n\n");
       if (!snapshots.length && !manual.length) {
         if (!additionsById.size && findCatalogTargets(context).length) {
           await vscode.window.showInformationMessage(
@@ -119,15 +139,32 @@ export function registerModelCatalogWatcher(
         return;
       }
       const choice = await vscode.window.showInformationMessage(
-        `New VS Code models available: ${names}${additions.length > 4 ? ` and ${additions.length - 4} more` : ""}. Update ${snapshots.length} already configured DSH / CodeBuddy / WorkBuddy model list(s)?${manual.length ? ` ${manual.length} catalog(s) require manual merging.` : ""}`,
-        ...(snapshots.length ? ["Update model lists"] : []),
+        `New VS Code models available: ${names}${shownModels.length > 4 ? ` and ${shownModels.length - 4} more` : ""}. Update ${snapshots.length} already configured DSH / CodeBuddy / WorkBuddy model list(s)?${manual.length ? ` ${manual.length} catalog(s) require manual merging.` : ""}`,
+        ...(snapshots.length
+          ? ["Update model lists", "Show update details"]
+          : []),
         ...(manual.length ? ["Review configuration"] : []),
         "Not now",
       );
       if (disposed) {
         return;
       }
-      if (choice === "Update model lists") {
+      let confirmed = choice;
+      if (choice === "Show update details") {
+        confirmed = await vscode.window.showInformationMessage(
+          "Review model catalog additions",
+          {
+            modal: true,
+            detail: `${details}${manual.length ? `\n\nManual review: ${manual.map((target) => target.path).join(", ")}` : ""}\n\nOnly the listed missing IDs will be appended; catalogs already containing them are untouched.`,
+          },
+          "Update model lists",
+          "Not now",
+        );
+      }
+      if (disposed) {
+        return;
+      }
+      if (confirmed === "Update model lists") {
         let count = 0;
         for (const snapshot of snapshots) {
           try {
@@ -158,7 +195,7 @@ export function registerModelCatalogWatcher(
         await vscode.window.showInformationMessage(
           `Updated ${count} existing model list(s). Existing defaults and credentials were preserved. Reopen the client model picker to see new options.`,
         );
-      } else if (choice === "Review configuration") {
+      } else if (confirmed === "Review configuration") {
         for (const target of manual) {
           await vscode.window.showTextDocument(
             await vscode.workspace.openTextDocument(

@@ -210,7 +210,7 @@ suite("Model catalog refresh", () => {
         capabilities: { supportsImageToText: true },
       }),
     );
-    assert.strictEqual(mapped.modelName, "Pretty (Agent Maestro)");
+    assert.strictEqual(mapped.modelName, "Pretty [other: new] (Agent Maestro)");
     assert.strictEqual(mapped.modelContextWindow, 921793);
     assert.strictEqual(mapped.modelMaxOutputTokens, 32768);
     assert.deepStrictEqual(mapped.modelInput, ["text", "image"]);
@@ -449,6 +449,7 @@ suite("Model catalog refresh", () => {
     watchers.push(watcher);
     await new Promise((resolve) => setTimeout(resolve, 850));
     assert.ok(read(target).includes(JSON.stringify(modelRouteId(fresh))));
+    assert.ok(messages.some((message) => message.includes("[other / fresh]")));
     assert.strictEqual(
       messages.filter((message) =>
         message.startsWith("New VS Code models available"),
@@ -466,6 +467,58 @@ suite("Model catalog refresh", () => {
     watcher.dispose();
     assert.strictEqual(eventDisposed, true);
   });
+  test("popup details identify only files missing an internal alias", async function () {
+    this.timeout(3000);
+    const alias = model("copilot-dictation-cleanup-luna", "copilot", {
+      name: "GPT-5.6 Luna",
+    });
+    const present = createDshManagedBlock({
+      baseURL: "http://localhost/v1",
+      modelId: alias.id,
+      models: [modelToDshConfig(alias)],
+    });
+    file("profiles/desktop/cordis.patch.yml", present);
+    const buddy = file(
+      ".workbuddy/models.json",
+      JSON.stringify({
+        models: [
+          {
+            id: "old",
+            name: "Old",
+            url: "http://localhost:23333/api/openai/v1/chat/completions",
+          },
+        ],
+      }),
+      "workbuddy",
+    );
+    state.set(MODEL_SNAPSHOT_KEY, [modelIdentity(model("old"))]);
+    mock(vscode.lm, "onDidChangeChatModels", () => ({ dispose() {} }));
+    mock(vscode.lm, "selectChatModels", async () => [model("old"), alias]);
+    mock(chatModelsCache, "refresh", async () => undefined);
+    mock(chatModelsCache, "getChatModels", async () => [model("old"), alias]);
+    let detail = "";
+    mock(
+      vscode.window,
+      "showInformationMessage",
+      async (_message: string, ...args: unknown[]) => {
+        const options = args.find((arg) => typeof arg === "object") as
+          | { detail?: string }
+          | undefined;
+        if (options) {
+          detail = options.detail ?? "";
+          return "Not now";
+        }
+        return "Show update details";
+      },
+    );
+    watchers.push(registerModelCatalogWatcher(context));
+    await new Promise((resolve) => setTimeout(resolve, 850));
+    assert.ok(detail.includes(buddy.path));
+    assert.ok(detail.includes("copilot-dictation-cleanup-luna"));
+    assert.ok(!detail.includes("cordis.patch.yml"));
+    assert.strictEqual(fs.readdirSync(path.dirname(buddy.path)).length, 1);
+  });
+
   test("dismissal does not write or repeat the same notification", async function () {
     this.timeout(4000);
     const target = file("profiles/desktop/cordis.patch.yml", `${block()}\n`);

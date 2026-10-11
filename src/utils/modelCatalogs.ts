@@ -10,7 +10,7 @@ import {
   createDshManagedBlock,
   getDshSettingsPath,
 } from "./dshSettings";
-import { modelRouteId } from "./modelIdentity";
+import { modelDisplayName, modelRouteId } from "./modelIdentity";
 
 export interface CatalogTarget {
   workspace?: string;
@@ -33,9 +33,7 @@ export function modelToDshConfig(
   };
   return {
     modelId: modelRouteId(model),
-    modelName: model.name.endsWith(" (Agent Maestro)")
-      ? model.name
-      : `${model.name} (Agent Maestro)`,
+    modelName: modelDisplayName(model),
     modelContextWindow:
       Number.isSafeInteger(model.maxInputTokens) && model.maxInputTokens > 0
         ? model.maxInputTokens

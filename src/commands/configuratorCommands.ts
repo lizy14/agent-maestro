@@ -32,7 +32,7 @@ import {
   modelToDshConfig,
   rememberCatalogTargets,
 } from "../utils/modelCatalogs";
-import { modelRouteId } from "../utils/modelIdentity";
+import { modelDisplayName, modelRouteId } from "../utils/modelIdentity";
 import { updateEnvFile } from "../utils/updateEnvFile";
 import { createCommandHandler } from "./commandHandler";
 
@@ -930,7 +930,12 @@ export function registerConfiguratorCommands(
           )
           .map((model) => ({
             modelId: model.modelId,
-            label: model.label,
+            label: (() => {
+              const runtime = chatModelsCache
+                .getCachedModels()
+                .find((candidate) => modelRouteId(candidate) === model.modelId);
+              return runtime ? modelDisplayName(runtime) : model.label;
+            })(),
             maxInputTokens: model.maxInputTokens,
             maxOutputTokens: model.maxOutputTokens,
             capabilities: model.capabilities,
