@@ -5,7 +5,7 @@
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/Joouis.agent-maestro)](https://marketplace.visualstudio.com/items?itemName=Joouis.agent-maestro)
 [![License](https://img.shields.io/github/license/Joouis/agent-maestro)](./LICENSE) -->
 
-Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Cline or Roo on demand and plug Claude Code, Codex, or Gemini CLI straight in through an OpenAI/Anthropic/Gemini-compatible API.
+Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Cline or Roo on demand and plug Claude Code, Codex, Gemini CLI, or DSH Desktop straight in through an OpenAI/Anthropic/Gemini-compatible API.
 
 ![Claude Code Support](https://media.githubusercontent.com/media/Joouis/agent-maestro/main/assets/configure-claude-code-demo.gif)
 
@@ -15,9 +15,9 @@ Turn VS Code into your compliant AI playground! With Agent Maestro, spin up Clin
 
 Turn VS Code into your compliant AI playground with powerful API compatibility and one-click setup:
 
-- **Universal API Compatibility**: Anthropic (`/messages`), OpenAI (`/chat/completions`, `/responses`), and Gemini compatible endpoints - use Claude Code, Codex, Gemini CLI or any LLM client seamlessly
+- **Universal API Compatibility**: Anthropic (`/messages`), OpenAI (`/chat/completions`, `/responses`), and Gemini compatible endpoints - use Claude Code, Codex, Gemini CLI, DSH Desktop, or any LLM client seamlessly
   - **Token Usage Reporting**: Reports Copilot-provided Anthropic token usage when available, including prompt cache reads and writes, with estimated token counts as a fallback
-- **One-Click Setup**: Automated configuration commands for instant Claude Code, Codex, and Gemini CLI integration
+- **One-Click Setup**: Automated configuration commands for instant Claude Code, Codex, Gemini CLI, and DSH Desktop integration
 - **Headless AI Agent Control**: Create and manage tasks through REST APIs for Roo Code and Cline extensions
   - **Comprehensive APIs**: Complete task lifecycle management with OpenAPI documentation at `/openapi.json`
   - **Parallel Execution**: Run up to 20 concurrent RooCode (and its variants like Kilo Code) tasks with built-in MCP server integration
@@ -34,6 +34,7 @@ Agent Maestro assumes you already installed one of the supported AI coding exten
 - [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) for personal development routines
 - [Codex](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) for personal development routines
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) for personal development routines
+- [DSH / DSH Desktop](https://github.com/deepseek-ai/deepseek-harness) for model selection through Agent Maestro's OpenAI-compatible proxy
 
 ### Installation
 
@@ -65,7 +66,7 @@ Each model retains its ID and receives a pretty name, runtime image-input capabi
 
 Existing files are backed up. Owned managed blocks are replaced without rewriting unrelated UI/MCP entries; conflicting extra target overrides or malformed markers require manual merging. For an unmanaged configuration, the existing document and suggested block open side by side. Replace/merge matching entries and preserve other providers; never append duplicate target IDs. Home-wide Cordis patches apply after profile patches.
 
-Set the Maestro API key (or a nonempty placeholder when authentication is disabled) in the environment inherited by DSH. Keep VS Code's proxy running and start a new DSH session to use a changed default. Live model/search behavior depends on your Copilot account; DSH web search uses a separate configured search provider.
+Set the Maestro API key (or a nonempty placeholder when authentication is disabled) in the environment inherited by DSH. Keep VS Code's proxy running and start a new DSH session to use a changed default. Live model/search behavior depends on your Copilot account; DSH web search uses a separate configured search provider. See the [DSH setup guide](docs/dsh-setup.md) for examples, model-picker behavior, safe updates, and troubleshooting.
 
 ### One-Click Setup for Gemini CLI
 
@@ -137,6 +138,7 @@ This feature:
 
    - `Agent Maestro: Configure Claude Code Settings` - One-click Claude Code setup
    - `Agent Maestro: Configure Codex Settings` - One-click Codex setup
+   - `Agent Maestro: Configure DSH Settings` - Desktop and CLI/Web model catalog setup
    - `Agent Maestro: Configure Gemini CLI Settings` - One-click Gemini CLI setup
    - `Agent Maestro: Fix GitHub Copilot Chat - Model is not supported error` - Remove header restriction to enable additional models
    - `Agent Maestro: Set LLM API Key` - Configure authentication for LLM API endpoints

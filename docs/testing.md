@@ -33,6 +33,16 @@ pnpm run watch-tests
 | `server/openaiResponses.test.ts`  | 45    | OpenAI Responses → VS Code conversion                     |
 | `server/gemini.test.ts`           | 27    | Gemini → VS Code message conversion                       |
 
+## DSH configuration coverage
+
+The DSH-specific suites cover complete eligible model catalogs, separate default selection, display names, image capabilities, known context/output limits, profile paths, credentials by reference, cancellation, backups/concurrent edits, and preserving unrelated UI/MCP patches during managed-block updates:
+
+- `utils/dshSettings.test.ts` — catalog generation, scalar escaping, formats, limits, managed markers and file-content updates.
+- `utils/dshSettingsSafety.test.ts` — conflicting/unsupported YAML layouts and preservation safeguards.
+- `utils/dshConfigurator.test.ts` — command callbacks with isolated temporary configuration and mocked model metadata; no hosted-model requests.
+
+The scoped DSH suites passed **219 tests** during this change's verification using an isolated local VS Code test host. Counts can change as coverage grows; use current runner output. Type checking, ESLint and test compilation also passed. These checks do not establish live DSH/Copilot image/chat/search behavior. Follow the [DSH setup guide](dsh-setup.md) for a manual connectivity check.
+
 ## How Tests Prevent Regressions
 
 1. **Extension Core** - Tests verify all commands register correctly and the extension activates without errors.
