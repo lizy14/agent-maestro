@@ -11,6 +11,11 @@ import {
   ensureClaudeConfigExists,
   ensureClaudeOnboardingComplete,
 } from "../utils/claude";
+import {
+  createClaudeDesktopGatewayConfig,
+  getClaudeDesktopConfigDirectory,
+  updateClaudeDesktopMetadata,
+} from "../utils/claudeDesktop";
 import { logger } from "../utils/logger";
 import { updateEnvFile } from "../utils/updateEnvFile";
 import { createCommandHandler } from "./commandHandler";
@@ -140,7 +145,7 @@ export function registerConfiguratorCommands(
 
         if (modelOptions.length === 0) {
           vscode.window.showErrorMessage(
-            "No available chat model provided by VS Code LM API.",
+            "No chat models are currently available from the VS Code Language Model API.",
           );
           return;
         }
@@ -224,6 +229,87 @@ export function registerConfiguratorCommands(
     ),
 
     vscode.commands.registerCommand(
+      "agent-maestro.configureClaudeDesktop",
+      createCommandHandler(async () => {
+        const configDirectory = getClaudeDesktopConfigDirectory();
+        const metadataPath = path.join(configDirectory, "_meta.json");
+        let metadata: {
+          appliedId?: string;
+          entries?: Array<{ id: string; name: string }>;
+        } = {};
+
+        try {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            vscode.window.showErrorMessage(
+              `Failed to read Claude Desktop metadata: ${(error as Error).message}`,
+            );
+            return;
+          }
+        }
+
+        const updatedMetadata = updateClaudeDesktopMetadata(metadata);
+        const settingsPath = path.join(
+          configDirectory,
+          `${updatedMetadata.appliedId}.json`,
+        );
+        let existingSettings: Record<string, unknown> = {};
+        let fileExists = false;
+
+        try {
+          existingSettings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+          fileExists = true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            vscode.window.showErrorMessage(
+              `Failed to read Claude Desktop settings: ${(error as Error).message}`,
+            );
+            return;
+          }
+        }
+
+        if (fileExists) {
+          const shouldOverride = await vscode.window.showQuickPick(
+            ["Yes", "No"],
+            {
+              title: "Claude Desktop Settings Found",
+              placeHolder:
+                "Settings already exist for Agent Maestro. Do you want to update them?",
+            },
+          );
+
+          if (shouldOverride !== "Yes") {
+            return;
+          }
+        }
+
+        const proxyPort = proxy.getStatus().port;
+        const updatedSettings = {
+          ...existingSettings,
+          ...createClaudeDesktopGatewayConfig(proxyPort),
+        };
+
+        fs.mkdirSync(configDirectory, { recursive: true });
+        fs.writeFileSync(
+          settingsPath,
+          JSON.stringify(updatedSettings, null, 2),
+        );
+        fs.writeFileSync(
+          metadataPath,
+          JSON.stringify(updatedMetadata, null, 2),
+        );
+
+        vscode.window.showInformationMessage(
+          `Claude Desktop settings ${fileExists ? "updated" : "created"} successfully! Fully quit and reopen Claude Desktop to apply the Agent Maestro proxy configuration.`,
+        );
+        logger.info(
+          `Claude Desktop settings ${fileExists ? "updated" : "created"}: ${settingsPath}`,
+        );
+      }, "Failed to configure Claude Desktop settings"),
+    ),
+
+    vscode.commands.registerCommand(
       "agent-maestro.configureCodex",
       createCommandHandler(async () => {
         const codexConfigPath = path.join(
@@ -282,7 +368,7 @@ export function registerConfiguratorCommands(
 
         if (modelOptions.length === 0) {
           vscode.window.showErrorMessage(
-            "No available chat model provided by VS Code LM API.",
+            "No chat models are currently available from the VS Code Language Model API.",
           );
           return;
         }
@@ -305,15 +391,23 @@ export function registerConfiguratorCommands(
           ...existingConfig,
           model: selectedModel.modelId,
           model_provider: "agent-maestro",
+          web_search:
+            existingConfig.web_search === "disabled" ? "disabled" : "live",
           ...(modelContextWindow !== undefined && {
             model_context_window: modelContextWindow,
           }),
+          features: {
+            ...existingConfig.features,
+            standalone_web_search: true,
+          },
           model_providers: {
             ...existingConfig.model_providers,
             "agent-maestro": {
+              ...existingConfig.model_providers?.["agent-maestro"],
               name: "Agent Maestro",
               base_url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1`,
               wire_api: "responses",
+              supports_standalone_web_search: true,
             },
           },
         };
@@ -440,7 +534,7 @@ export function registerConfiguratorCommands(
 
         if (modelOptions.length === 0) {
           vscode.window.showErrorMessage(
-            "No available chat model provided by VS Code LM API.",
+            "No chat models are currently available from the VS Code Language Model API.",
           );
           return;
         }

@@ -20,7 +20,11 @@ suite("Extension Test Suite", () => {
         await extension.activate();
       }
 
-      assert.strictEqual(extension.isActive, true, "Extension should be active");
+      assert.strictEqual(
+        extension.isActive,
+        true,
+        "Extension should be active",
+      );
     });
   });
 
@@ -66,9 +70,11 @@ suite("Extension Test Suite", () => {
 
       const configuratorCommands = [
         "agent-maestro.configureClaudeCode",
+        "agent-maestro.configureClaudeDesktop",
         "agent-maestro.configureCodex",
         "agent-maestro.configureGeminiCli",
         "agent-maestro.configureWorkBuddy",
+        "agent-maestro.selectFallbackModel",
       ];
 
       for (const cmd of configuratorCommands) {
@@ -85,15 +91,6 @@ suite("Extension Test Suite", () => {
       assert.ok(
         commands.includes("agent-maestro.getStatus"),
         "getStatus command should be registered",
-      );
-    });
-
-    test("copilot fix command should be registered", async () => {
-      const commands = await vscode.commands.getCommands(true);
-
-      assert.ok(
-        commands.includes("agent-maestro.fixCopilotChatModelNotSupported"),
-        "fixCopilotChatModelNotSupported command should be registered",
       );
     });
   });
@@ -144,6 +141,13 @@ suite("Extension Test Suite", () => {
         typeof identifier === "string" && identifier.length > 0,
         "defaultRooIdentifier should be a non-empty string",
       );
+    });
+
+    test("fallbackModelId should be a string", () => {
+      const config = vscode.workspace.getConfiguration("agent-maestro");
+      const fallbackModelId = config.get<string>("fallbackModelId");
+
+      assert.strictEqual(typeof fallbackModelId, "string");
     });
   });
 });

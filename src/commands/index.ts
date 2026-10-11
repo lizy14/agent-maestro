@@ -4,11 +4,12 @@ import { ExtensionController } from "../core/controller";
 import { McpServer } from "../server/McpServer";
 import { ProxyServer } from "../server/ProxyServer";
 import { registerConfiguratorCommands } from "./configuratorCommands";
-import { registerCopilotFixCommands } from "./copilotFixCommands";
 import { registerLlmApiKeyCommands } from "./llmApiKeyCommands";
 import { registerMcpCommands } from "./mcpCommands";
+import { registerModelCommands } from "./modelCommands";
 import { registerProxyCommands } from "./proxyCommands";
 import { registerStatusCommands } from "./statusCommands";
+import { registerWebSearchCommands } from "./webSearchCommands";
 
 export function registerAllCommands(
   context: vscode.ExtensionContext,
@@ -19,7 +20,8 @@ export function registerAllCommands(
   registerProxyCommands(proxy, context);
   registerMcpCommands(mcpServer, context);
   registerConfiguratorCommands(proxy, context);
-  registerCopilotFixCommands(context);
+  registerModelCommands(context);
   registerStatusCommands(controller, context);
   registerLlmApiKeyCommands(proxy, context);
+  registerWebSearchCommands(context);
 }

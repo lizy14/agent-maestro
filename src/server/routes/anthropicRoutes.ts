@@ -16,25 +16,37 @@ import {
   type AnthropicTokenUsage,
   convertAnthropicMessagesToVSCode,
   convertAnthropicSystemToVSCode,
-  convertAnthropicToolChoiceToVSCode,
-  convertAnthropicToolToVSCode,
   extractAnthropicUsage,
 } from "../utils/anthropic";
 import {
   createAnthropicModelsResponse,
   findAnthropicModelById,
 } from "../utils/anthropicModels";
+import {
+  AnthropicRequestValidationError,
+  prepareAnthropicTools,
+} from "../utils/anthropicWebSearch";
 import { handleErrorWithLogging } from "../utils/errorDiagnostics";
 import { isResponseTooLongError } from "../utils/languageModelErrors";
+import {
+  LANGUAGE_MODEL_REQUEST_TIMEOUT_MS,
+  LanguageModelClientDisconnectedError,
+  LanguageModelRequestLifecycle,
+  LanguageModelRequestTimeoutError,
+  interruptibleLanguageModelStream,
+} from "../utils/languageModelRequestLifecycle";
+import { SSE_HEARTBEAT, withSseHeartbeat } from "../utils/sseHeartbeat";
+import {
+  WEB_SEARCH_PROVIDER_TIMEOUT_MS,
+  WebSearchProvider,
+} from "../webSearch/webSearchProvider";
+import { handleAnthropicWebSearch } from "./anthropicWebSearchHandler";
 
 const prepareAnthropicMessages = async ({
   requestBody,
 }: {
   requestBody: Anthropic.Messages.MessageCreateParams;
 }) => {
-  logger.debug("/v1/messages payload:");
-  logger.debug(JSON.stringify(requestBody, null, 2));
-
   const { system, messages } = requestBody;
 
   const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
@@ -112,6 +124,15 @@ const messagesRoute = createRoute({
         },
       },
       description: "Internal server error",
+    },
+    504: {
+      content: {
+        "application/json": {
+          schema: AnthropicErrorResponseSchema,
+        },
+      },
+      description:
+        "Gateway timeout - language model request exceeded 10 minutes",
     },
   },
 });
@@ -256,7 +277,24 @@ const modelRoute = createRoute({
   },
 });
 
-export function registerAnthropicRoutes(app: OpenAPIHono) {
+export interface AnthropicRoutesOptions {
+  heartbeatIntervalMs?: number;
+  providerTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  resolveChatModelClient?: typeof getChatModelClient;
+  webSearchProvider?: WebSearchProvider;
+}
+
+export function registerAnthropicRoutes(
+  app: OpenAPIHono,
+  options: AnthropicRoutesOptions = {},
+) {
+  const requestTimeoutMs =
+    options.requestTimeoutMs ?? LANGUAGE_MODEL_REQUEST_TIMEOUT_MS;
+  const resolveChatModelClient =
+    options.resolveChatModelClient ?? getChatModelClient;
+  const providerTimeoutMs =
+    options.providerTimeoutMs ?? WEB_SEARCH_PROVIDER_TIMEOUT_MS;
   // GET /v1/models - Anthropic-compatible models endpoint
   app.openapi(modelsRoute, async (c) => {
     try {
@@ -322,7 +360,7 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
     let effectiveModelId = "";
     let rawRequestBody;
     let lmChatMessages: vscode.LanguageModelChatMessage[] | undefined;
-    let cancellationTokenSource: vscode.CancellationTokenSource | undefined;
+    let requestLifecycle: LanguageModelRequestLifecycle | undefined;
 
     try {
       // Parse request body
@@ -338,9 +376,15 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
         output_config,
         ...msgCreateParams
       } = requestBody;
+      const preparedTools = prepareAnthropicTools({
+        tools,
+        toolChoice: tool_choice,
+        messages,
+        serverWebSearchAvailable: options.webSearchProvider !== undefined,
+      });
       // 1. Get chat model client (handles model mapping internally)
       const { client: initialClient, error: clientError } =
-        await getChatModelClient(model);
+        await resolveChatModelClient(model);
 
       if (initialClient) {
         effectiveModelId = initialClient.id;
@@ -357,8 +401,11 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
         requestBody,
       });
       lmChatMessages = vsCodeLmMessages;
-      cancellationTokenSource = new vscode.CancellationTokenSource();
-      const cancellationToken = cancellationTokenSource.token;
+      requestLifecycle = new LanguageModelRequestLifecycle(
+        c.req.raw.signal,
+        requestTimeoutMs,
+      );
+      const cancellationToken = requestLifecycle.token;
       logger.info(
         `→ /v1/messages | model: ${
           model === effectiveModelId ? model : `${model} → ${effectiveModelId}`
@@ -370,8 +417,8 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
         justification:
           "Anthropic-compatible /v1/messages endpoint with streaming support using VS Code Language Model API",
         modelOptions: msgCreateParams,
-        tools: convertAnthropicToolToVSCode(tools),
-        toolMode: convertAnthropicToolChoiceToVSCode(tool_choice),
+        tools: preparedTools.tools,
+        toolMode: preparedTools.toolMode,
       };
       // Forwarded to Copilot, but Copilot's Anthropic Messages path does not yet
       // apply reasoning effort to the outgoing request, so this is a no-op until
@@ -379,27 +426,48 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
       const copilotConfiguration = getCopilotModelConfiguration({
         reasoningEffort: output_config?.effort,
       });
+      const configuredRequestOptions = withCopilotConfiguration(
+        client,
+        lmRequestOptions,
+        copilotConfiguration,
+      );
+
+      if (preparedTools.usesWebSearchLoop) {
+        return await handleAnthropicWebSearch({
+          c,
+          client,
+          heartbeatIntervalMs: options.heartbeatIntervalMs,
+          lifecycle: requestLifecycle,
+          maxTokens: requestBody.max_tokens,
+          messages: vsCodeLmMessages,
+          model,
+          preparedTools,
+          provider: options.webSearchProvider!,
+          providerTimeoutMs,
+          requestOptions: configuredRequestOptions,
+          stream: msgCreateParams.stream,
+        });
+      }
 
       // 5. Send request to the VS Code LM API
-      const response = await client.sendRequest(
-        vsCodeLmMessages,
-        withCopilotConfiguration(
-          client,
-          lmRequestOptions,
-          copilotConfiguration,
+      const response = await requestLifecycle.waitFor(
+        client.sendRequest(
+          vsCodeLmMessages,
+          configuredRequestOptions,
+          cancellationToken,
         ),
-        cancellationToken,
       );
 
       const getFallbackUsage = async (
         accumulatedText: string,
       ): Promise<AnthropicTokenUsage> => {
-        const inputTokenCount = await client.countTokens(
-          JSON.stringify(requestBody),
-          cancellationToken,
+        const inputTokenCount = await requestLifecycle!.waitFor(
+          client.countTokens(JSON.stringify(requestBody), cancellationToken),
         );
         const outputTokenCount = accumulatedText
-          ? await client.countTokens(accumulatedText, cancellationToken)
+          ? await requestLifecycle!.waitFor(
+              client.countTokens(accumulatedText, cancellationToken),
+            )
           : 1;
 
         return {
@@ -418,7 +486,10 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
         let stopReason: Anthropic.Messages.StopReason = "end_turn";
 
         try {
-          for await (const chunk of response.stream) {
+          for await (const chunk of interruptibleLanguageModelStream(
+            response.stream,
+            requestLifecycle,
+          )) {
             if (chunk instanceof vscode.LanguageModelTextPart) {
               let lastBlock = content.at(-1);
               if (!lastBlock || lastBlock.type !== "text") {
@@ -467,7 +538,7 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
           stop_reason:
             stopReason === "max_tokens"
               ? "max_tokens"
-              : content.at(-1)?.type === "tool_use"
+              : content.some((block) => block.type === "tool_use")
                 ? "tool_use"
                 : "end_turn",
           stop_sequence: null,
@@ -490,7 +561,7 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
           `← /v1/messages | input: ${usage.input_tokens} | cache_read: ${usage.cache_read_input_tokens} | cache_creation: ${usage.cache_creation_input_tokens} | output: ${usage.output_tokens}`,
         );
 
-        cancellationTokenSource.dispose();
+        requestLifecycle.dispose();
         return c.json(resp);
       }
 
@@ -501,10 +572,12 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
           const writeSSE = async (
             message: Anthropic.Messages.RawMessageStreamEvent,
           ) => {
-            await stream.writeSSE({
-              event: message.type,
-              data: JSON.stringify(message),
-            });
+            await requestLifecycle!.waitFor(
+              stream.writeSSE({
+                event: message.type,
+                data: JSON.stringify(message),
+              }),
+            );
           };
 
           await writeSSE({
@@ -538,7 +611,23 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
           let stopReason: Anthropic.Messages.StopReason = "end_turn";
 
           try {
-            for await (const chunk of response.stream) {
+            for await (const chunk of withSseHeartbeat(
+              interruptibleLanguageModelStream(
+                response.stream,
+                requestLifecycle!,
+              ),
+              options.heartbeatIntervalMs,
+            )) {
+              if (chunk === SSE_HEARTBEAT) {
+                await requestLifecycle!.waitFor(
+                  stream.writeSSE({
+                    event: "ping",
+                    data: JSON.stringify({ type: "ping" }),
+                  }),
+                );
+                continue;
+              }
+
               const lastBlock = contentBlocks.at(-1);
               if (chunk instanceof vscode.LanguageModelTextPart) {
                 // Stop last non-text block if it exists
@@ -649,7 +738,7 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
               stop_reason:
                 stopReason === "max_tokens"
                   ? "max_tokens"
-                  : contentBlocks.at(-1)?.type === "tool_use"
+                  : contentBlocks.some((block) => block.type === "tool_use")
                     ? "tool_use"
                     : "end_turn",
               stop_sequence: null,
@@ -668,15 +757,75 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
           logger.info(
             `← /v1/messages (stream) | input: ${usage.input_tokens} | cache_read: ${usage.cache_read_input_tokens} | cache_creation: ${usage.cache_creation_input_tokens} | output: ${usage.output_tokens}`,
           );
-          cancellationTokenSource?.dispose();
+          requestLifecycle?.dispose();
         },
-        async (error, _stream) => {
+        async (error, stream) => {
+          if (error instanceof LanguageModelClientDisconnectedError) {
+            logger.info("/v1/messages | client disconnected");
+            requestLifecycle?.dispose();
+            await stream.close();
+            return;
+          }
+
+          if (error instanceof LanguageModelRequestTimeoutError) {
+            logger.error("✕ /v1/messages |", error);
+            try {
+              await stream.writeSSE({
+                event: "error",
+                data: JSON.stringify({
+                  type: "error",
+                  error: {
+                    type: "timeout_error",
+                    message: error.message,
+                  },
+                  request_id: null,
+                }),
+              });
+            } finally {
+              requestLifecycle?.dispose();
+              await stream.close();
+            }
+            return;
+          }
+
           logger.error("✕ /v1/messages |", error);
-          cancellationTokenSource?.dispose();
+          requestLifecycle?.dispose();
         },
       );
     } catch (error) {
-      cancellationTokenSource?.dispose();
+      requestLifecycle?.dispose();
+
+      if (error instanceof AnthropicRequestValidationError) {
+        return c.json(
+          {
+            error: {
+              message: error.message,
+              type: "invalid_request_error",
+              code: error.code,
+            },
+          },
+          400,
+        );
+      }
+
+      if (error instanceof LanguageModelRequestTimeoutError) {
+        logger.error("✕ /v1/messages |", error);
+        return c.json(
+          {
+            error: {
+              message: error.message,
+              type: "timeout_error",
+            },
+          },
+          504,
+        );
+      }
+
+      if (error instanceof LanguageModelClientDisconnectedError) {
+        logger.info("/v1/messages | client disconnected");
+        return new Response(null, { status: 499 });
+      }
+
       logger.error("✕ /v1/messages |", error);
 
       const logFilePath = await handleErrorWithLogging({
@@ -721,7 +870,7 @@ export function registerAnthropicRoutes(app: OpenAPIHono) {
     try {
       const requestBody =
         (await c.req.json()) as Anthropic.Messages.MessageCreateParams;
-      const { client, error: clientError } = await getChatModelClient(
+      const { client, error: clientError } = await resolveChatModelClient(
         requestBody.model,
       );
 
