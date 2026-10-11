@@ -9,6 +9,7 @@ import { performClaudeCodeSelfCheck } from "./utils/claude";
 import { readConfiguration } from "./utils/config";
 import { checkCopilotPromptCacheSetting } from "./utils/copilotPromptCache";
 import { logger } from "./utils/logger";
+import { registerModelCatalogWatcher } from "./utils/modelCatalogWatcher";
 
 let controller: ExtensionController;
 let proxy: ProxyServer;
@@ -63,6 +64,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Register all commands
   registerAllCommands(context, controller, proxy, mcpServer);
+  registerModelCatalogWatcher(context);
 
   await vscode.commands.executeCommand("agent-maestro.startProxyServer");
   await vscode.commands.executeCommand("agent-maestro.startMcpServer");
