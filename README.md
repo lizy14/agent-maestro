@@ -93,7 +93,7 @@ You can choose between:
 - **User Settings** (`~/.codebuddy/models.json` and `~/.workbuddy/models.json`): Personal global settings for all projects
 - **Project Settings** (`<workspace>/.codebuddy/models.json` and `<workspace>/.workbuddy/models.json`): Project-specific settings
 
-This automatically creates or updates both `.codebuddy/models.json` and `.workbuddy/models.json` with all proxy-eligible VS Code chat models, each routed to Agent Maestro's OpenAI-compatible endpoint. Capability flags such as `supportsToolCall` and `supportsImages` are derived from the model metadata returned by the VS Code LM API/Copilot runtime:
+This automatically creates or updates both `.codebuddy/models.json` and `.workbuddy/models.json` with all proxy-eligible VS Code chat models, each routed to Agent Maestro's OpenAI-compatible endpoint. Only the `models` array is written — `availableModels` is intentionally **not** written, so the host app's built-in models stay selectable (writing it as a whitelist of only these custom IDs would hide the built-in models). Capability flags such as `supportsToolCall` and `supportsImages` are derived from the model metadata returned by the VS Code LM API/Copilot runtime:
 
 ```json
 {
@@ -118,8 +118,7 @@ This automatically creates or updates both `.codebuddy/models.json` and `.workbu
       "supportsToolCall": true,
       "supportsImages": true
     }
-  ],
-  "availableModels": ["gpt-5.5", "claude-sonnet-4"]
+  ]
 }
 ```
 
