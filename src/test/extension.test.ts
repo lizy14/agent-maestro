@@ -73,6 +73,7 @@ suite("Extension Test Suite", () => {
         "agent-maestro.configureClaudeDesktop",
         "agent-maestro.configureCodex",
         "agent-maestro.configureGeminiCli",
+        "agent-maestro.configureWorkBuddy",
         "agent-maestro.selectFallbackModel",
       ];
 
