@@ -4,6 +4,8 @@ Start with the [project README](../README.md) for installation and client setup.
 
 ## Current Guides
 
+- [DSH / DSH Desktop setup](dsh-setup.md): complete model catalog, model picker, credentials, safe Cordis patch updates, and troubleshooting.
+
 | Guide                                                    | Use it for                                                                             |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [LLM compatibility](llm-compatibility.md)                | Endpoint examples, content/history support, search differences, usage, and log privacy |

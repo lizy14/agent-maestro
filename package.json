@@ -155,6 +155,11 @@
         "category": "Agent Maestro"
       },
       {
+        "command": "agent-maestro.configureDsh",
+        "title": "Configure DSH Settings",
+        "category": "Agent Maestro"
+      },
+      {
         "command": "agent-maestro.configureGeminiCli",
         "title": "Configure Gemini CLI Settings",
         "category": "Agent Maestro"

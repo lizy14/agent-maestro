@@ -34,6 +34,16 @@ Use the test runner's output for current counts; parameterized suites make manua
 
 Follow existing `suite` / `test` conventions with Node `assert`. Cover the observable regression, restore mocks/listeners in cleanup hooks, and use isolated temporary files/ports. Do not make ordinary tests consume external model or Exa quota. See [AGENTS.md](../AGENTS.md#tests) for required coverage.
 
+## DSH configuration coverage
+
+The DSH-specific suites cover complete eligible model catalogs, separate default selection, display names, image capabilities, known context/output limits, profile paths, credentials by reference, cancellation, backups/concurrent edits, and preserving unrelated UI/MCP patches during managed-block updates:
+
+- `utils/dshSettings.test.ts` — catalog generation, scalar escaping, formats, limits, managed markers and file-content updates.
+- `utils/dshSettingsSafety.test.ts` — conflicting/unsupported YAML layouts and preservation safeguards.
+- `utils/dshConfigurator.test.ts` — command callbacks with isolated temporary configuration and mocked model metadata; no hosted-model requests.
+
+The scoped DSH suites passed **219 tests** during this change's verification using an isolated local VS Code test host. Counts can change as coverage grows; use current runner output. Type checking, ESLint and test compilation also passed. These checks do not establish live DSH/Copilot image/chat/search behavior. Follow the [DSH setup guide](dsh-setup.md) for a manual connectivity check.
+
 ## Manual Validation
 
 Unit tests do not prove UI behavior or live provider compatibility. Record the AM revision, VS Code/client versions, model, isolated ports, expected output, and relevant AM logs for manual runs. Avoid sharing raw request/session logs without applying the [logging guidance](llm-compatibility.md#diagnostic-logs).

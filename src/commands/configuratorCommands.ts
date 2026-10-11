@@ -5,7 +5,10 @@ import { parse, stringify } from "smol-toml";
 import * as vscode from "vscode";
 
 import { ProxyServer } from "../server/ProxyServer";
-import { getChatModelsQuickPickItems } from "../utils/chatModels";
+import {
+  chatModelsCache,
+  getChatModelsQuickPickItems,
+} from "../utils/chatModels";
 import { withClaudeCode1mSuffix } from "../utils/claude";
 import {
   ensureClaudeConfigExists,
@@ -16,6 +19,14 @@ import {
   getClaudeDesktopConfigDirectory,
   updateClaudeDesktopMetadata,
 } from "../utils/claudeDesktop";
+import {
+  DshConfigFormat,
+  DshModelConfig,
+  createDshManagedBlock,
+  getDshPatchPath,
+  getDshSettingsPath,
+  updateDshSettingsContent,
+} from "../utils/dshSettings";
 import { logger } from "../utils/logger";
 import { updateEnvFile } from "../utils/updateEnvFile";
 import { createCommandHandler } from "./commandHandler";
@@ -443,6 +454,200 @@ export function registerConfiguratorCommands(
           await vscode.commands.executeCommand("workbench.action.reloadWindow");
         }
       }, "Failed to configure Codex settings"),
+    ),
+
+    vscode.commands.registerCommand(
+      "agent-maestro.configureDsh",
+      createCommandHandler(async () => {
+        const target = await vscode.window.showQuickPick(
+          [
+            {
+              label: "DSH Desktop",
+              description: "Recommended: desktop profile Cordis patch",
+              format: "profile-patch" as DshConfigFormat,
+            },
+            {
+              label: "DSH CLI / Web Profile",
+              description: "Choose a named profile Cordis patch",
+              format: "profile-patch" as DshConfigFormat,
+            },
+            {
+              label: "Legacy DSH",
+              description: "Older settings.yaml configuration",
+              format: "legacy-settings" as DshConfigFormat,
+            },
+          ],
+          {
+            title: "Configure DSH Settings",
+            placeHolder: "Choose the DSH installation to configure",
+          },
+        );
+        if (!target) {
+          return;
+        }
+        let profile = "desktop";
+        if (target.label === "DSH CLI / Web Profile") {
+          const value = await vscode.window.showInputBox({
+            title: "DSH Profile",
+            prompt: "Enter the profile name used by DSH",
+            value: "default",
+            validateInput: (value) =>
+              /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(value)
+                ? undefined
+                : "Use letters, numbers, underscores, and hyphens only.",
+          });
+          if (value === undefined) {
+            return;
+          }
+          profile = value;
+        }
+        const dshSettingsPath =
+          target.format === "profile-patch"
+            ? getDshPatchPath(profile)
+            : getDshSettingsPath();
+
+        let existingContent = "";
+        let fileExists = false;
+        try {
+          existingContent = fs.readFileSync(dshSettingsPath, "utf8");
+          fileExists = true;
+
+          const shouldOverride = await vscode.window.showQuickPick(
+            ["Yes", "No"],
+            {
+              title: "DSH Settings Found",
+              placeHolder: `Update the Agent Maestro managed block in ${dshSettingsPath}? No / Esc cancels. Existing unmanaged provider entries require manual merging.`,
+            },
+          );
+
+          if (shouldOverride !== "Yes") {
+            return;
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            vscode.window.showErrorMessage(
+              `Failed to read DSH settings: ${(error as Error).message}`,
+            );
+            return;
+          }
+        }
+
+        await chatModelsCache.refresh();
+        const modelOptions = await getChatModelsQuickPickItems({
+          recommendedModelId: "gpt-6.1-sol",
+          priorityFamily: "openai",
+        });
+
+        if (modelOptions.length === 0) {
+          vscode.window.showErrorMessage(
+            "No available chat model provided by VS Code LM API. Check Copilot sign-in and model availability.",
+          );
+          return;
+        }
+
+        const selectedModel = await vscode.window.showQuickPick(modelOptions, {
+          title: "Select model",
+          placeHolder:
+            "Choose the default model; all supported models will be available in DSH",
+        });
+
+        if (!selectedModel?.modelId) {
+          return;
+        }
+
+        const catalog = new Map<string, DshModelConfig>();
+        for (const model of chatModelsCache.getCachedModels()) {
+          const runtimeModel = model as vscode.LanguageModelChat & {
+            maxOutputTokens?: number;
+            capabilities?: {
+              imageInput?: boolean;
+              supportsImageToText?: boolean;
+            };
+          };
+          const supportsImages =
+            runtimeModel.capabilities?.imageInput === true ||
+            runtimeModel.capabilities?.supportsImageToText === true;
+          catalog.set(model.id, {
+            modelId: model.id,
+            modelName: model.name.endsWith(" (Agent Maestro)")
+              ? model.name
+              : `${model.name} (Agent Maestro)`,
+            modelContextWindow:
+              model.maxInputTokens > 0 ? model.maxInputTokens : undefined,
+            modelMaxOutputTokens:
+              runtimeModel.maxOutputTokens !== undefined &&
+              runtimeModel.maxOutputTokens > 0
+                ? runtimeModel.maxOutputTokens
+                : undefined,
+            modelInput: supportsImages ? ["text", "image"] : ["text"],
+          });
+        }
+        const proxyPort = proxy.getStatus().port;
+        const managedBlock = createDshManagedBlock({
+          baseURL: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1`,
+          modelId: selectedModel.modelId,
+          models: [...catalog.values()],
+          format: target.format,
+        });
+        const update = updateDshSettingsContent(
+          existingContent,
+          managedBlock,
+          target.format,
+        );
+
+        if (update.blockedByExistingLlmPiAi) {
+          const document = await vscode.workspace.openTextDocument({
+            language: "yaml",
+            content: `${managedBlock}\n`,
+          });
+          await vscode.window.showTextDocument(document, {
+            viewColumn: vscode.ViewColumn.Beside,
+          });
+          if (fileExists) {
+            const existingDocument = await vscode.workspace.openTextDocument(
+              vscode.Uri.file(dshSettingsPath),
+            );
+            await vscode.window.showTextDocument(existingDocument, {
+              viewColumn: vscode.ViewColumn.One,
+            });
+          }
+          vscode.window.showErrorMessage(
+            `DSH configuration at ${dshSettingsPath} contains unmanaged provider/default-model entries, malformed managed markers, or an unsupported YAML layout. No changes were made. Replace/merge existing provider and default-model entries using the suggested block; do not append duplicate IDs. Preserve other providers and UI patches.`,
+          );
+          return;
+        }
+
+        fs.mkdirSync(path.dirname(dshSettingsPath), { recursive: true });
+        // Do not clobber an edit made while the model picker was open.
+        const currentlyExists = fs.existsSync(dshSettingsPath);
+        const currentContent = currentlyExists
+          ? fs.readFileSync(dshSettingsPath, "utf8")
+          : "";
+        if (
+          currentlyExists !== fileExists ||
+          currentContent !== existingContent
+        ) {
+          throw new Error(
+            "DSH configuration changed during setup. Run the command again.",
+          );
+        }
+        if (fileExists) {
+          fs.copyFileSync(
+            dshSettingsPath,
+            `${dshSettingsPath}.${Date.now()}.bak`,
+            fs.constants.COPYFILE_EXCL,
+          );
+        }
+        fs.writeFileSync(dshSettingsPath, update.content);
+
+        vscode.window.showInformationMessage(
+          `DSH settings ${fileExists ? "updated" : "created"} successfully at ${dshSettingsPath} with ${catalog.size} models! Switch models in DSH’s model picker. Restart DSH to apply. Set AGENT_MAESTRO_API_KEY in the environment inherited by DSH to the Agent Maestro LLM API key, or any non-empty placeholder if authentication is disabled.`,
+        );
+
+        logger.info(
+          `DSH settings ${fileExists ? "updated" : "created"}: ${dshSettingsPath}`,
+        );
+      }, "Failed to configure DSH settings"),
     ),
 
     vscode.commands.registerCommand(
