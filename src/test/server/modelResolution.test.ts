@@ -3,9 +3,12 @@ import * as vscode from "vscode";
 
 import {
   type CopilotModelConfiguration,
+  chatModelsCache,
+  getChatModelClient,
   getCopilotModelConfiguration,
   jaccardSimilarity,
   withCopilotConfiguration,
+  withCopilotConversationId,
 } from "../../utils/chatModels";
 import { withClaudeCode1mSuffix } from "../../utils/claude";
 
@@ -93,6 +96,72 @@ suite("Model Resolution Test Suite", () => {
       const oneM = jaccardSimilarity("claude-opus-4-6", "claude-opus-4.6-1m");
       assert.ok(base >= 0.3, `base (${base.toFixed(3)}) should be >= 0.3`);
       assert.ok(oneM >= 0.3, `1m (${oneM.toFixed(3)}) should be >= 0.3`);
+    });
+  });
+
+  suite("getChatModelClient fallback", () => {
+    test("uses configured, auto, then first-available fallback models", async () => {
+      const configured = createMockModel({
+        id: "gpt-5.6-sol",
+        version: "5.6",
+      });
+      const sameVersionAsAuto = createMockModel({
+        id: "another-model",
+        version: "auto-version",
+      });
+      const auto = createMockModel({ id: "auto", version: "auto-version" });
+      const configuration = vscode.workspace.getConfiguration("agent-maestro");
+      const previousFallbackModelId =
+        configuration.inspect<string>("fallbackModelId")?.globalValue;
+      const originalGetChatModels = chatModelsCache.getChatModels;
+
+      try {
+        chatModelsCache.getChatModels = async () => [
+          sameVersionAsAuto,
+          configured,
+          auto,
+        ];
+        await configuration.update(
+          "fallbackModelId",
+          configured.id,
+          vscode.ConfigurationTarget.Global,
+        );
+        assert.strictEqual(
+          (await getChatModelClient("codex-auto-review")).client,
+          configured,
+        );
+
+        await configuration.update(
+          "fallbackModelId",
+          "missing-model",
+          vscode.ConfigurationTarget.Global,
+        );
+        assert.strictEqual(
+          (await getChatModelClient("codex-auto-review")).client,
+          auto,
+        );
+
+        await configuration.update(
+          "fallbackModelId",
+          undefined,
+          vscode.ConfigurationTarget.Global,
+        );
+        chatModelsCache.getChatModels = async () => [
+          sameVersionAsAuto,
+          configured,
+        ];
+        assert.strictEqual(
+          (await getChatModelClient("codex-auto-review")).client,
+          sameVersionAsAuto,
+        );
+      } finally {
+        chatModelsCache.getChatModels = originalGetChatModels;
+        await configuration.update(
+          "fallbackModelId",
+          previousFallbackModelId,
+          vscode.ConfigurationTarget.Global,
+        );
+      }
     });
   });
 
@@ -186,6 +255,21 @@ suite("Model Resolution Test Suite", () => {
         getCopilotModelConfiguration({ reasoningEffort: 1 }),
         {},
       );
+    });
+  });
+
+  suite("withCopilotConversationId", () => {
+    test("maps prompt_cache_key to Copilot _conversationId", () => {
+      assert.deepStrictEqual(
+        withCopilotConversationId({ temperature: 1 }, "session-1 "),
+        { temperature: 1, _conversationId: "session-1 " },
+      );
+    });
+
+    test("ignores missing, empty, or non-string cache keys", () => {
+      assert.deepStrictEqual(withCopilotConversationId({}, undefined), {});
+      assert.deepStrictEqual(withCopilotConversationId({}, "  "), {});
+      assert.deepStrictEqual(withCopilotConversationId({}, 42), {});
     });
   });
 });

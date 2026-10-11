@@ -1,5 +1,64 @@
 # Changelog
 
+## v2.14.1 - 2026.09.29
+
+- Fix GPT prompt-cache misses (`cached_tokens: 0`) with Copilot Chat 0.67 (VS Code 1.139), which enables explicit cache mode by default. On that version, Agent Maestro offers on startup to set `github.copilot.chat.responsesApi.promptCacheBreakpoint.enabled` to `false` when it has never been configured. Upgrading to VS Code 1.140 also resolves it. See [GPT prompt cache](docs/copilot-gpt-prompt-cache.md).
+- Forward OpenAI `prompt_cache_key` to Copilot as the conversation ID instead of dropping it.
+- Fix Codex custom tools, such as code execution, receiving JSON instead of raw input by advertising their input schema to VS Code language models, and preserve namespace instructions when flattening tool declarations.
+- Keep Claude Code's tool loop running when a model emits text after a tool call, including when Anthropic web search is enabled.
+- Update `image-size` to 2.0.4 to fix denial-of-service vulnerabilities where crafted JXL, HEIF, or ICNS images could hang image processing in the proxy (GHSA-5p2g-fcmc-qvqq, GHSA-w3rx-r6r6-pgpr).
+
+## v2.14.0 - 2026.09.06
+
+- Add experimental Codex standalone search at `/api/openai/v1/alpha/search`, with search queries, page `open`/`find`, and domain, date, country, and cache-only controls. Rerun **Agent Maestro: Configure Codex Settings** to add the required configuration; existing `web_search = "disabled"` settings are preserved.
+- Add hosted search directly to `/api/openai/v1/responses`: declare `web_search` to let AM search and generate an answer with source citations within the same request, with streaming support. Both search paths work without an Exa API key, subject to anonymous rate limits.
+- Fix Gemini CLI JSON parsing errors and Codex idle timeouts during slow or long-running responses.
+- Fix request failures caused by missing or repeated tool results when resuming conversations, and preserve results from parallel Codex tool calls. These improvements apply across Anthropic-, OpenAI-, and Gemini-compatible APIs.
+- Update client setup and troubleshooting instructions, and clarify supported search features and remote-access requirements.
+- **API compatibility:** Unsupported and preview web-search tool declarations in OpenAI Responses requests now return HTTP 400 instead of being silently ignored. Use `web_search` or `web_search_2025_08_26`.
+
+## v2.13.0 - 2026.08.28
+
+- Add transparent Exa-powered web search to Anthropic-compatible requests, with streamed source links and support for anonymous or securely authenticated access.
+- Fix Codex Multi-Agent V2 subagents receiving empty tasks through the Responses API.
+- Prevent malformed compaction or replay data from breaking Anthropic and Responses conversations by preserving orphaned tool results and ignoring duplicates.
+- Add MiniMax support to Roo Code without exposing its API key in settings or profile responses.
+
+## v2.12.0 - 2026.08.20
+
+- Add the global `agent-maestro.fallbackModelId` setting and `Agent Maestro: Select Fallback Model` command for requests whose model ID cannot be matched to an available VS Code language model.
+
+## v2.11.2 - 2026.08.20
+
+- Preserve images nested in OpenAI Responses tool outputs as VS Code language model data parts instead of serializing their base64 payloads as text.
+- Keep Anthropic, OpenAI, and Gemini SSE responses active while waiting for slow language model output.
+- Remove the nonfunctional experimental GPT-5+ web search commands and unstable Copilot bundle patching, which repeatedly broke across VS Code releases.
+
+## v2.11.1 - 2026.07.17
+
+- Add `Configure Claude Desktop Settings` command to point Claude Desktop at the Agent Maestro proxy.
+
+## v2.11.0 - 2026.07.15
+
+- Add experimental commands that patch the currently loaded Copilot Chat bundle to append the OpenAI web search tool declaration for supported GPT-5 Codex requests, and restore backups created by that patch. Tested with `ChatGPT 26.707.72221`: `GPT-5.4` and `GPT-5.5` work; `GPT-5.6` does not yet forward the web search tool declaration to the server.
+- Preserve Codex custom tool source input when proxying OpenAI Responses tool calls.
+- Cancel stalled Anthropic and OpenAI language model requests after ten minutes or when clients disconnect.
+
+## v2.10.0 - 2026.07.10
+
+- Add support for OpenAI Responses API `additional_tools`, `custom`, and `namespace` tools, enabling GPT-5.6 and Codex tool calling through Agent Maestro. Custom tool calls now preserve raw string input, and named `tool_choice` requests are enforced.
+- Remove the GitHub Copilot Chat header fixer command because current VS Code builds ship Copilot Chat as a built-in extension, making the old user-extension patch path obsolete.
+
+## v2.9.7 - 2026.07.04
+
+- Fix Anthropic tool-result images being rejected as a media-type mismatch when large JPEG/GIF/WebP bytes were relabeled as PNG. Top-level image parts still keep the VS Code resize workaround, while nested tool-result images now preserve their declared media type.
+- Stop showing an MCP startup notification during extension activation when no Roo-compatible task manager is available.
+
+## v2.9.6 - 2026.06.23
+
+- Forward reasoning effort settings to Copilot for OpenAI and Anthropic proxy requests. OpenAI-backed models apply the setting today; Claude/Anthropic requests forward it but require upstream Copilot support to take effect.
+- Fix images sent to Copilot vision models being rejected as a media-type mismatch (e.g. "specified image/jpeg, but the image appears to be image/png"). The VS Code Language Model API re-encodes images to PNG when both dimensions exceed 768px without updating their declared MIME type; Agent Maestro now relabels affected images so the type matches the bytes. Applies to the Anthropic, OpenAI Chat, OpenAI Responses, and Gemini routes.
+
 ## v2.9.5 - 2026.06.10
 
 - Fix Claude Code 1M model routing to preserve requested model IDs instead of rewriting them to synthetic internal Copilot variants.
