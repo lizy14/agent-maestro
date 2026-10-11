@@ -1,6 +1,8 @@
+import { OpenAPIHono } from "@hono/zod-openapi";
 import * as assert from "assert";
 import * as vscode from "vscode";
 
+import { registerAnthropicRoutes } from "../../server/routes/anthropicRoutes";
 import {
   convertAnthropicMessageToVSCode,
   convertAnthropicMessagesToVSCode,
@@ -14,6 +16,8 @@ import {
   findAnthropicModelById,
 } from "../../server/utils/anthropicModels";
 import { isResponseTooLongError } from "../../server/utils/languageModelErrors";
+import { logger } from "../../utils/logger";
+import { WEBP_1024x935_BASE64 } from "../utils/imageMime.fixtures";
 
 function createMockModel(
   overrides: Partial<vscode.LanguageModelChat> & {
@@ -310,6 +314,38 @@ suite("Anthropic Conversion Utils Test Suite", () => {
       }
     });
 
+    test("should preserve tool_result image media type for large images", () => {
+      const message = {
+        role: "user" as const,
+        content: [
+          {
+            type: "tool_result" as const,
+            tool_use_id: "tool-large-image",
+            content: [
+              {
+                type: "image" as const,
+                source: {
+                  type: "base64" as const,
+                  media_type: "image/webp" as const,
+                  data: WEBP_1024x935_BASE64,
+                },
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = convertAnthropicMessageToVSCode(message);
+
+      assert.ok(!Array.isArray(result));
+      const toolResultPart = result
+        .content[0] as vscode.LanguageModelToolResultPart;
+      const imagePart = toolResultPart.content[0];
+
+      assert.ok(imagePart instanceof vscode.LanguageModelDataPart);
+      assert.strictEqual(imagePart.mimeType, "image/webp");
+    });
+
     test("should convert tool_result with mixed text and image content", () => {
       const base64Data =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -408,6 +444,223 @@ suite("Anthropic Conversion Utils Test Suite", () => {
     test("should handle empty messages array", () => {
       const result = convertAnthropicMessagesToVSCode([]);
       assert.strictEqual(result.length, 0);
+    });
+
+    test("should pair parallel tool results by ID", () => {
+      const result = convertAnthropicMessagesToVSCode([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-a",
+              name: "first",
+              input: {},
+            },
+            {
+              type: "tool_use",
+              id: "tool-b",
+              name: "second",
+              input: {},
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-b",
+              content: "second result",
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "tool-a",
+              content: "first result",
+            },
+          ],
+        },
+      ]);
+
+      const toolResults = result[1].content.filter(
+        (part) => part instanceof vscode.LanguageModelToolResultPart,
+      ) as vscode.LanguageModelToolResultPart[];
+      assert.deepStrictEqual(
+        toolResults.map((part) => part.callId),
+        ["tool-b", "tool-a"],
+      );
+    });
+
+    test("should keep server tool turns as ordinary assistant content", () => {
+      const result = convertAnthropicMessagesToVSCode([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "server_tool_use",
+              id: "srvtoolu_123",
+              name: "web_search",
+              input: { query: "current weather" },
+            },
+            {
+              type: "web_search_tool_result",
+              tool_use_id: "srvtoolu_123",
+              content: [
+                {
+                  type: "web_search_result",
+                  url: "https://example.com/weather",
+                  title: "Weather",
+                  encrypted_content: "encrypted",
+                },
+              ],
+            },
+          ],
+        },
+      ] as any);
+
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(
+        result[0].role,
+        vscode.LanguageModelChatMessageRole.Assistant,
+      );
+      assert.ok(
+        result[0].content.every(
+          (part) => part instanceof vscode.LanguageModelTextPart,
+        ),
+      );
+      assert.ok(
+        result[0].content.every(
+          (part) => !(part instanceof vscode.LanguageModelToolCallPart),
+        ),
+      );
+      assert.ok(
+        result[0].content.every(
+          (part) => !(part instanceof vscode.LanguageModelToolResultPart),
+        ),
+      );
+      assert.match(
+        (result[0].content[0] as vscode.LanguageModelTextPart).value,
+        /srvtoolu_123/,
+      );
+      assert.match(
+        (result[0].content[1] as vscode.LanguageModelTextPart).value,
+        /srvtoolu_123/,
+      );
+    });
+
+    test("should preserve orphaned results as text and drop duplicates", () => {
+      const warnings: string[] = [];
+      const originalWarn = logger.warn;
+      logger.warn = (message: string) => warnings.push(message);
+
+      try {
+        const result = convertAnthropicMessagesToVSCode([
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-known",
+                name: "known",
+                input: {},
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-missing",
+                content: "orphaned output",
+              },
+              {
+                type: "tool_result",
+                tool_use_id: "tool-known",
+                content: "first output",
+              },
+              {
+                type: "tool_result",
+                tool_use_id: "tool-known",
+                content: "first output",
+              },
+              {
+                type: "tool_result",
+                tool_use_id: "tool-missing",
+                content: "orphaned output",
+              },
+            ],
+          },
+        ]);
+
+        assert.strictEqual(result.length, 2);
+        const parts = result[1].content;
+        assert.ok(parts[0] instanceof vscode.LanguageModelTextPart);
+        assert.match(
+          (parts[0] as vscode.LanguageModelTextPart).value,
+          /tool-missing/,
+        );
+        assert.strictEqual(
+          (parts[1] as vscode.LanguageModelTextPart).value,
+          "orphaned output",
+        );
+        const toolResults = parts.filter(
+          (part) => part instanceof vscode.LanguageModelToolResultPart,
+        ) as vscode.LanguageModelToolResultPart[];
+        assert.strictEqual(toolResults.length, 1);
+        assert.strictEqual(toolResults[0].callId, "tool-known");
+        assert.strictEqual(
+          (toolResults[0].content[0] as vscode.LanguageModelTextPart).value,
+          "first output",
+        );
+        assert.strictEqual(warnings.length, 1);
+        assert.match(warnings[0], /"orphanedResults":1/);
+        assert.match(warnings[0], /"duplicateResults":2/);
+      } finally {
+        logger.warn = originalWarn;
+      }
+    });
+
+    test("should preserve calls and results with invalid IDs as text", () => {
+      const warnings: string[] = [];
+      const originalWarn = logger.warn;
+      logger.warn = (message: string) => warnings.push(message);
+
+      try {
+        const result = convertAnthropicMessagesToVSCode([
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                name: "missing-id",
+                input: {},
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: null,
+                content: "invalid output",
+              },
+            ],
+          },
+        ] as any);
+
+        assert.strictEqual(result.length, 2);
+        assert.ok(
+          result
+            .flatMap((message) => message.content)
+            .every((part) => part instanceof vscode.LanguageModelTextPart),
+        );
+        assert.strictEqual(warnings.length, 1);
+        assert.match(warnings[0], /"conflictGroups":1/);
+      } finally {
+        logger.warn = originalWarn;
+      }
     });
   });
 
@@ -761,5 +1014,71 @@ suite("Anthropic Conversion Utils Test Suite", () => {
         output_tokens: 10,
       });
     });
+  });
+});
+
+suite("Anthropic response stop reason", () => {
+  const createGptToolThenTextApp = () => {
+    const app = new OpenAPIHono();
+    registerAnthropicRoutes(app, {
+      requestTimeoutMs: 1_000,
+      resolveChatModelClient: async () => ({
+        client: createMockModel({
+          id: "gpt-6-astra",
+          name: "GPT-6 Astra",
+          family: "gpt-6",
+          sendRequest: async () => ({
+            stream: (async function* () {
+              yield new vscode.LanguageModelToolCallPart(
+                "call-1",
+                "read_file",
+                { path: "/test" },
+              );
+              yield new vscode.LanguageModelTextPart("Reading the file now.");
+            })(),
+            text: (async function* () {})(),
+          }),
+        }),
+      }),
+    });
+    return app;
+  };
+
+  const requestBody = {
+    model: "gpt-6-astra",
+    max_tokens: 100,
+    messages: [{ role: "user", content: "Read a file" }],
+  };
+
+  test("preserves tool_use when text follows a tool call", async () => {
+    const response = await createGptToolThenTextApp().request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+    const body = (await response.json()) as Record<string, any>;
+
+    assert.strictEqual(response.status, 200);
+    assert.deepStrictEqual(
+      body.content.map((block: Record<string, unknown>) => block.type),
+      ["tool_use", "text"],
+    );
+    assert.strictEqual(body.stop_reason, "tool_use");
+  });
+
+  test("preserves tool_use in a stream when text follows a tool call", async () => {
+    const response = await createGptToolThenTextApp().request("/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...requestBody, stream: true }),
+    });
+    const events = (await response.text())
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)));
+    const messageDelta = events.find((event) => event.type === "message_delta");
+
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(messageDelta?.delta.stop_reason, "tool_use");
   });
 });
