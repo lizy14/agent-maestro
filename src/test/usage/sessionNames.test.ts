@@ -3,9 +3,18 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { CodexSessionNames, codexSessionIndex } from "../../usage/sessionNames";
+import {
+  CodexSessionNames,
+  codexSessionIndex,
+  sameFileIdentity,
+} from "../../usage/sessionNames";
 
 suite("Automatic Codex session names", () => {
+  test("accepts unspecified Windows device IDs but rejects a replaced file", () => {
+    assert.ok(sameFileIdentity({ ino: 123, dev: 0 }, { ino: 123, dev: 456 }));
+    assert.ok(!sameFileIdentity({ ino: 123, dev: 0 }, { ino: 124, dev: 456 }));
+    assert.ok(!sameFileIdentity({ ino: 123, dev: 45 }, { ino: 123, dev: 456 }));
+  });
   let home: string;
   setup(async () => {
     home = await fs.mkdtemp(path.join(os.tmpdir(), "maestro-names-"));

@@ -5,6 +5,16 @@ import * as path from "node:path";
 import { parseSessionNames } from "./model";
 
 const MAX_BYTES = 5 * 1024 * 1024;
+export function sameFileIdentity(
+  left: { ino: number; dev: number },
+  right: { ino: number; dev: number },
+): boolean {
+  // Windows lstat can report dev=0 while fstat reports the volume serial.
+  return (
+    left.ino === right.ino &&
+    (left.dev === right.dev || left.dev === 0 || right.dev === 0)
+  );
+}
 export interface SessionNamesResult {
   names: Record<string, string>;
   status: "loaded" | "missing" | "unavailable" | "too-large";
@@ -67,7 +77,7 @@ export class CodexSessionNames {
       }
       handle = await fs.open(file, "r");
       const stat = await handle.stat();
-      if (stat.ino !== entry.ino || stat.dev !== entry.dev) {
+      if (!sameFileIdentity(entry, stat)) {
         return empty("unavailable");
       }
       if (!stat.isFile()) {
