@@ -90,6 +90,94 @@
           "default": "",
           "description": "Model ID to use when a requested model is unavailable after exact and fuzzy matching. Leave empty to use VS Code's automatic model fallback.",
           "scope": "application"
+        },
+        "agent-maestro.usage.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record local model-call metrics for the usage dashboard. Stores no prompts, response content, credentials, or tool arguments.",
+          "scope": "application"
+        },
+        "agent-maestro.usage.priceOverrides": {
+          "type": "object",
+          "default": {},
+          "scope": "application",
+          "description": "Exact model ID to USD per million text tokens. Estimates only; use your BYOK rates. Required input/output, optional cacheRead/cacheWrite. Overrides replace catalog rates.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "input",
+              "output"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": "number",
+                "minimum": 0
+              },
+              "output": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheRead": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheWrite": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "agent-maestro.usage.priceAliases": {
+          "type": "object",
+          "default": {},
+          "scope": "application",
+          "description": "Explicit exact model ID aliases for usage cost estimates. No fuzzy matching; unknown models remain unpriced.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "agent-maestro.usage.autoSessionNames": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Automatically resolve Codex session names from session_index.jsonl in Codex Home, CODEX_HOME, or ~/.codex. Reads only ID/title metadata on the extension host; no credentials or transcripts. Disable to stop automatic discovery; manual imports are managed separately."
+        },
+        "agent-maestro.usage.codexHome": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Optional absolute Codex home directory for automatic session names. Empty uses CODEX_HOME or ~/.codex on this extension host. For remote/container hosts, use a read-only mounted metadata directory. No recursive search is performed."
+        },
+        "agent-maestro.usage.githubCredits.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Poll official GitHub AI-credit billing usage via existing GitHub CLI login every 30 minutes while the dashboard is visible. No login scopes are changed. Only usage totals are stored locally. Organization-managed plans require organization billing access."
+        },
+        "agent-maestro.usage.githubCredits.scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "organization"
+          ],
+          "default": "user",
+          "scope": "application",
+          "description": "Billing scope. User applies only to a personally billed Copilot plan; organization requires administrator billing permissions."
+        },
+        "agent-maestro.usage.githubCredits.organization": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Organization login for organization-scoped GitHub AI-credit usage."
+        },
+        "agent-maestro.usage.githubCredits.monthlyAllowance": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "scope": "application",
+          "description": "Known monthly allowance in AI credits for the selected billing scope, entered by you. GitHub usage API does not expose quota. Zero means unknown; percentages and month-end over/under projection remain unavailable."
         }
       }
     },
@@ -178,6 +266,12 @@
         "command": "agent-maestro.setExaApiKey",
         "title": "Set Exa API Key",
         "category": "Agent Maestro"
+      },
+      {
+        "command": "agent-maestro.openUsageDashboard",
+        "title": "Open Usage Dashboard",
+        "category": "Agent Maestro",
+        "icon": "$(graph)"
       }
     ]
   },

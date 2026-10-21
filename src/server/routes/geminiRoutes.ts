@@ -4,6 +4,7 @@ import { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import * as vscode from "vscode";
 
+import { sendTrackedRequest } from "../../usage/tracker";
 import {
   getChatModelClient,
   withCopilotConfiguration,
@@ -371,7 +372,8 @@ export function registerGeminiRoutes(
 
       // 3. Send request to VSCode LM API
       // No Gemini request field is currently mapped to Copilot reasoning effort.
-      const response = await client.sendRequest(
+      const response = await sendTrackedRequest(
+        client,
         vsCodeLmMessages,
         withCopilotConfiguration(client, lmRequestOptions),
         cancellationTokenSource.token,
@@ -516,7 +518,8 @@ export function registerGeminiRoutes(
         // No Gemini request field is currently mapped to Copilot reasoning effort.
         const cancellationToken = requestLifecycle.token;
         const response = await requestLifecycle.waitFor(
-          client.sendRequest(
+          sendTrackedRequest(
+            client,
             vsCodeLmMessages,
             withCopilotConfiguration(client, lmRequestOptions),
             cancellationToken,

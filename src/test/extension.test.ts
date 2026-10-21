@@ -37,6 +37,7 @@ suite("Extension Test Suite", () => {
         "agent-maestro.stopProxyServer",
         "agent-maestro.restartProxyServer",
         "agent-maestro.getProxyServerStatus",
+        "agent-maestro.openUsageDashboard",
       ];
 
       for (const cmd of proxyCommands) {
@@ -92,6 +93,26 @@ suite("Extension Test Suite", () => {
         commands.includes("agent-maestro.getStatus"),
         "getStatus command should be registered",
       );
+    });
+    test("usage dashboard command opens one webview and reuses it", async () => {
+      await vscode.commands.executeCommand("agent-maestro.openUsageDashboard");
+      await vscode.commands.executeCommand("agent-maestro.openUsageDashboard");
+      const dashboardTabs = () =>
+        vscode.window.tabGroups.all
+          .flatMap((group) => group.tabs)
+          .filter((tab) => tab.label === "Agent Maestro Usage");
+      // Tab groups are updated asynchronously by the workbench renderer.
+      for (
+        let attempt = 0;
+        attempt < 100 && dashboardTabs().length === 0;
+        attempt++
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const tabs = dashboardTabs();
+      assert.strictEqual(tabs.length, 1);
+      assert.ok(tabs[0].input instanceof vscode.TabInputWebview);
+      await vscode.window.tabGroups.close(tabs);
     });
   });
 

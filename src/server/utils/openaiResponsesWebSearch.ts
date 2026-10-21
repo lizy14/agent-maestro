@@ -6,6 +6,7 @@ import {
 } from "openai/resources/responses/responses";
 import * as vscode from "vscode";
 
+import { sendTrackedRequest } from "../../usage/tracker";
 import { logger } from "../../utils/logger";
 import {
   MAX_WEB_SEARCH_RESULTS,
@@ -702,7 +703,7 @@ const collectModelRound = async ({
   lifecycle: LanguageModelRequestLifecycle;
 }): Promise<CollectedModelRound> => {
   const response = await lifecycle.waitFor(
-    client.sendRequest(messages, requestOptions, lifecycle.token),
+    sendTrackedRequest(client, messages, requestOptions, lifecycle.token),
   );
   const parts: Array<
     vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart
