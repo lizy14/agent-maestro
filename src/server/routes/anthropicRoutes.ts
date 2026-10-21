@@ -4,6 +4,7 @@ import { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import * as vscode from "vscode";
 
+import { sendTrackedRequest } from "../../usage/tracker";
 import {
   chatModelsCache,
   getChatModelClient,
@@ -451,7 +452,8 @@ export function registerAnthropicRoutes(
 
       // 5. Send request to the VS Code LM API
       const response = await requestLifecycle.waitFor(
-        client.sendRequest(
+        sendTrackedRequest(
+          client,
           vsCodeLmMessages,
           configuredRequestOptions,
           cancellationToken,

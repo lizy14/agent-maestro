@@ -9,6 +9,7 @@ import {
 } from "openai/resources/responses/responses";
 import * as vscode from "vscode";
 
+import { sendTrackedRequest } from "../../../usage/tracker";
 import {
   getChatModelClient,
   getCopilotModelConfiguration,
@@ -375,7 +376,8 @@ export function registerOpenaiResponsesRoutes(
       // 9. Handle non-streaming response
       if (!stream) {
         const response = await requestLifecycle.waitFor(
-          client.sendRequest(
+          sendTrackedRequest(
+            client,
             vsCodeMessages,
             configuredRequestOptions,
             cancellationToken,
@@ -513,7 +515,8 @@ export function registerOpenaiResponsesRoutes(
             sequenceNumberRef,
             async (writeSSE) => {
               const response = await requestLifecycle!.waitFor(
-                client.sendRequest(
+                sendTrackedRequest(
+                  client,
                   vsCodeMessages,
                   configuredRequestOptions,
                   cancellationToken,

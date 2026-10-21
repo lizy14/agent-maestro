@@ -90,6 +90,12 @@
           "default": "",
           "description": "Model ID to use when a requested model is unavailable after exact and fuzzy matching. Leave empty to use VS Code's automatic model fallback.",
           "scope": "application"
+        },
+        "agent-maestro.usage.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record local model-call metrics for the usage dashboard. Stores no prompts, response content, credentials, or tool arguments.",
+          "scope": "application"
         }
       }
     },
@@ -178,6 +184,12 @@
         "command": "agent-maestro.setExaApiKey",
         "title": "Set Exa API Key",
         "category": "Agent Maestro"
+      },
+      {
+        "command": "agent-maestro.openUsageDashboard",
+        "title": "Open Usage Dashboard",
+        "category": "Agent Maestro",
+        "icon": "$(graph)"
       }
     ]
   },

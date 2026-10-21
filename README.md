@@ -17,6 +17,17 @@ For automation, Agent Maestro also exposes Roo Code tasks through REST and MCP: 
 - **Search for current information.** Exa-backed search supports declared Anthropic/Responses web-search tools and experimental Codex standalone search, with source links and protocol-specific limits.
 - **Configure longer conversations.** Claude Code and Codex setup uses the selected model's advertised context window. Streaming heartbeats keep supported clients connected while a response is pending.
 - **Automate Roo tasks.** Use HTTP/SSE for task progress and interaction, or the MCP task tool for up to 20 concurrent tasks.
+- **Inspect local usage.** Run **Agent Maestro: Open Usage Dashboard** for token/cache totals, latency, model and session breakdowns, and daily charts. No proxy or database service is required.
+
+### Usage dashboard
+
+The dashboard records model calls made through Agent Maestro's Anthropic, OpenAI, and Gemini generation endpoints, including individual rounds of hosted web search. It does not observe native Copilot Chat or other traffic that bypasses Maestro. Token and cache values come from provider usage metadata; missing usage is shown as unavailable, not zero or an invented cache saving. Reasoning tokens are a subset of output tokens. Cache hit rate is token-weighted over calls with reported cache counts; it is not a request hit rate or a billing estimate.
+
+Collection is local and can be disabled with `agent-maestro.usage.enabled`. Records contain numeric usage, timing, model, endpoint, outcome, and bounded client/session identifiers—no prompts, generated text, tool arguments, request bodies, credentials, or arbitrary headers. The extension stores a rotating JSONL journal in its VS Code global storage, retaining at most 30 days and approximately 100 MiB. The dashboard reads at most the newest 50,000 records. Each extension host writes a separate journal, so multiple windows do not overwrite one another. Remote extension hosts keep their own storage; use persistent volumes for dev containers.
+
+Session IDs are taken from `x-agent-maestro-session-id`, Codex `session_id` / `session-id` / `thread-id`, or the model request's conversation/cache identifier. Clients can send `x-agent-maestro-session-name` explicitly. **Import Codex session names** lets you choose a `session_index.jsonl` metadata file; only ID/title pairs are imported, and no credentials or chat transcripts are read. Titles are optional metadata and may be sensitive. The dashboard never scans other extensions' private databases or reads names automatically. Native Copilot session names are not available through this integration.
+
+Use the date/model/session filters to inspect a subset, **Export JSON** to save that view, or **Refresh** to include another window's newly persisted records. Statistics start when this version is activated; earlier traffic is not reconstructed. Requests that fail before a model is invoked are not counted. A terminated extension host can lose an in-flight call; interrupted calls with no provider usage have unknown token counts.
 
 This README and the [documentation index](docs/README.md) describe this checkout. Features in pending `.changeset/` entries may not yet be available in the installed Marketplace release; check the [changelog](CHANGELOG.md) for released versions.
 

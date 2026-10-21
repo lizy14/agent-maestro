@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import * as vscode from "vscode";
 
+import { sendTrackedRequest } from "../../usage/tracker";
 import {
   MAX_WEB_SEARCH_RESULTS,
   WEB_SEARCH_PROVIDER_TIMEOUT_MS,
@@ -508,7 +509,7 @@ const collectModelRound = async ({
   lifecycle: LanguageModelRequestLifecycle;
 }): Promise<CollectedModelRound> => {
   const response = await lifecycle.waitFor(
-    client.sendRequest(messages, requestOptions, lifecycle.token),
+    sendTrackedRequest(client, messages, requestOptions, lifecycle.token),
   );
   const blocks: Anthropic.Messages.ContentBlock[] = [];
   const parts: Array<

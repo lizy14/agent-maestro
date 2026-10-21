@@ -1,15 +1,20 @@
+import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { registerAllCommands } from "./commands";
 import { ExtensionController } from "./core/controller";
 import { McpServer } from "./server/McpServer";
 import { ProxyServer } from "./server/ProxyServer";
+import { registerUsageDashboard } from "./usage/dashboard";
+import { UsageStore } from "./usage/store";
+import { configureUsageTracking } from "./usage/tracker";
 import { chatModelsCache } from "./utils/chatModels";
 import { performClaudeCodeSelfCheck } from "./utils/claude";
 import { readConfiguration } from "./utils/config";
 import { checkCopilotPromptCacheSetting } from "./utils/copilotPromptCache";
 import { logger } from "./utils/logger";
 
+let usageStore: UsageStore | undefined;
 let controller: ExtensionController;
 let proxy: ProxyServer;
 let mcpServer: McpServer;
@@ -32,6 +37,19 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Not awaited: the notification must not block activation.
   void checkCopilotPromptCacheSetting(context);
+
+  usageStore = new UsageStore(
+    path.join(context.globalStorageUri.fsPath, "usage"),
+    () => logger.warn("Usage history could not be persisted"),
+  );
+  configureUsageTracking(
+    (row) => usageStore?.append(row),
+    () =>
+      vscode.workspace
+        .getConfiguration("agent-maestro")
+        .get("usage.enabled", true),
+  );
+  registerUsageDashboard(context, usageStore);
 
   // Initialize the extension controller
   controller = new ExtensionController();
@@ -72,6 +90,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export async function deactivate() {
+  configureUsageTracking(
+    () => {},
+    () => false,
+  );
+  await usageStore?.flush();
   try {
     if (mcpServer) {
       await mcpServer.stop();

@@ -4,6 +4,7 @@ import { streamSSE } from "hono/streaming";
 import OpenAI from "openai";
 import * as vscode from "vscode";
 
+import { sendTrackedRequest } from "../../../usage/tracker";
 import {
   getChatModelClient,
   getCopilotModelConfiguration,
@@ -195,7 +196,8 @@ export function registerOpenaiChatRoutes(
 
       // 4. Send request to VSCode LM API
       const response = await requestLifecycle.waitFor(
-        client.sendRequest(
+        sendTrackedRequest(
+          client,
           vsCodeLmMessages,
           withCopilotConfiguration(
             client,

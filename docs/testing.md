@@ -46,6 +46,10 @@ The scoped DSH suites passed **219 tests** during this change's verification usi
 
 ## Manual Validation
 
+The usage dashboard suites under src/test/usage cover streaming and non-streaming provider usage for Anthropic, OpenAI Chat/Responses, and Gemini; multi-round and concurrent session correlation; cancellation and provider errors; weighted cache rates; journal reload/retention; schema allowlisting; and HTML escaping. The extension suite checks that **Open Usage Dashboard** creates and reuses a webview. These tests use synthetic usage, not live provider credentials.
+
+For dashboard UI review, invoke **Agent Maestro: Open Usage Dashboard**, change period/model/session filters, inspect the empty state, import a synthetic session_index.jsonl, forget imported names, and export a filtered view. Check light/dark themes, keyboard navigation, and a narrow editor column. Automated webview activation does not prove every native file-dialog or rendering path.
+
 Unit tests do not prove UI behavior or live provider compatibility. Record the AM revision, VS Code/client versions, model, isolated ports, expected output, and relevant AM logs for manual runs. Avoid sharing raw request/session logs without applying the [logging guidance](llm-compatibility.md#diagnostic-logs).
 
 - Use the [Codex collaboration runbook](codex-multi-agent-e2e.md) for Responses namespace/plaintext collaboration changes.

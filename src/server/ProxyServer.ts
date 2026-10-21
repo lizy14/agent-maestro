@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import * as vscode from "vscode";
 
 import { ExtensionController } from "../core/controller";
+import { usageMiddleware } from "../usage/tracker";
 import { DEFAULT_CONFIG } from "../utils/config";
 import {
   ANOTHER_INSTANCE_RUNNING_MESSAGE,
@@ -86,6 +87,8 @@ export class ProxyServer {
       "/api/gemini/*",
       createGeminiAuthMiddleware(this.getLlmApiKey.bind(this)),
     );
+
+    this.app.use("*", usageMiddleware());
 
     // Register routes under the /api/v1 namespace
     this.app.route("/api/v1", this.getApiV1Routes());
