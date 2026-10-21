@@ -1,6 +1,13 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 
+import {
+  DashboardOptions,
+  ModelPrice,
+  analyze,
+  enrichedRecords,
+  exportCsv,
+} from "./analytics";
 import { dashboardHtml } from "./dashboardHtml";
 import { UsageFilter, filterRecords, parseSessionNames } from "./model";
 import { UsageStore } from "./store";
@@ -13,6 +20,15 @@ export function registerUsageDashboard(
   let days = 30;
   let filter: UsageFilter = {};
   let generation = 0;
+  let display: DashboardOptions = {};
+  const pricing = () => ({
+    overrides: vscode.workspace
+      .getConfiguration("agent-maestro")
+      .get<Record<string, ModelPrice>>("usage.priceOverrides", {}),
+    aliases: vscode.workspace
+      .getConfiguration("agent-maestro")
+      .get<Record<string, string>>("usage.priceAliases", {}),
+  });
   const refresh = async () => {
     const revision = ++generation;
     const current = panel;
@@ -28,7 +44,10 @@ export function registerUsageDashboard(
         "usage.sessionNames",
         {},
       );
-      filter.since = Date.now() - days * 86400000;
+      if (days) {
+        filter.since = Date.now() - days * 86400000;
+        filter.until = undefined;
+      }
       current.webview.html = dashboardHtml(
         randomBytes(24).toString("hex"),
         snapshot.records,
@@ -40,6 +59,7 @@ export function registerUsageDashboard(
           .getConfiguration("agent-maestro")
           .get("usage.enabled", true),
         snapshot.truncated,
+        { ...display, pricing: pricing() },
       );
     } catch {
       vscode.window.showErrorMessage(
@@ -70,9 +90,18 @@ export function registerUsageDashboard(
             days?: number;
             model?: string;
             session?: string;
+            client?: string;
+            outcome?: string;
+            cache?: string;
+            inputSize?: string;
+            since?: number;
+            until?: number;
+            pivot?: DashboardOptions["pivot"];
+            metric?: DashboardOptions["metric"];
+            bucket?: DashboardOptions["bucket"];
           };
           if (
-            ![1, 7, 30].includes(data.days ?? 0) ||
+            ![0, 1, 7, 30].includes(data.days ?? -1) ||
             typeof data.model !== "string" ||
             data.model.length > 160 ||
             typeof data.session !== "string" ||
@@ -80,11 +109,66 @@ export function registerUsageDashboard(
           ) {
             return;
           }
+          if (
+            !["", "Codex", "Claude", "Copilot", "Gemini", "Other"].includes(
+              data.client ?? "",
+            ) ||
+            !["", "completed", "failed", "cancelled"].includes(
+              data.outcome ?? "",
+            ) ||
+            !["", "hit", "miss", "unknown"].includes(data.cache ?? "") ||
+            !["", "small", "medium", "large", "huge", "unknown"].includes(
+              data.inputSize ?? "",
+            ) ||
+            ![
+              "model",
+              "session",
+              "client",
+              "endpoint",
+              "cache",
+              "modelCache",
+              "inputBucket",
+            ].includes(data.pivot ?? "modelCache") ||
+            ![
+              "tokens",
+              "cost",
+              "ttft",
+              "latency",
+              "throughput",
+              "cache",
+            ].includes(data.metric ?? "tokens") ||
+            !["day", "hour"].includes(data.bucket ?? "day")
+          ) {
+            return;
+          }
+          if (
+            data.days === 0 &&
+            (typeof data.since !== "number" ||
+              !Number.isFinite(data.since) ||
+              data.since < 0 ||
+              data.since > 8640000000000000 ||
+              (data.until !== undefined &&
+                (!Number.isFinite(data.until) ||
+                  data.until < data.since ||
+                  data.until > 8640000000000000)))
+          ) {
+            return;
+          }
           days = data.days!;
           filter = {
             model: data.model,
             session: data.session,
-            since: Date.now() - days * 86400000,
+            client: data.client,
+            outcome: data.outcome,
+            cache: data.cache,
+            inputSize: data.inputSize,
+            since: days ? Date.now() - days * 86400000 : data.since,
+            until: days ? undefined : data.until,
+          };
+          display = {
+            pivot: data.pivot,
+            metric: data.metric,
+            bucket: data.bucket,
           };
           try {
             if (data.type === "refresh" || data.type === "filter") {
@@ -118,9 +202,18 @@ export function registerUsageDashboard(
               await context.globalState.update("usage.sessionNames", undefined);
               await refresh();
             }
-            if (data.type === "export") {
+            if (data.type === "pricing") {
+              await vscode.commands.executeCommand(
+                "workbench.action.openSettings",
+                "agent-maestro.usage.price",
+              );
+            }
+            if (data.type === "export" || data.type === "csv") {
+              const selectedFilter = { ...filter };
+              const selectedPricing = pricing();
               const destination = await vscode.window.showSaveDialog({
-                filters: { JSON: ["json"] },
+                filters:
+                  data.type === "csv" ? { CSV: ["csv"] } : { JSON: ["json"] },
                 saveLabel: "Export usage metrics",
               });
               if (!destination) {
@@ -130,16 +223,30 @@ export function registerUsageDashboard(
               await vscode.workspace.fs.writeFile(
                 destination,
                 Buffer.from(
-                  JSON.stringify(
-                    {
-                      version: 1,
-                      exportedAt: new Date().toISOString(),
-                      truncated: snapshot.truncated,
-                      records: filterRecords(snapshot.records, filter),
-                    },
-                    null,
-                    2,
-                  ),
+                  data.type === "csv"
+                    ? exportCsv(
+                        filterRecords(snapshot.records, selectedFilter),
+                        selectedPricing,
+                      )
+                    : JSON.stringify(
+                        {
+                          version: 1,
+                          exportedAt: new Date().toISOString(),
+                          truncated: snapshot.truncated,
+                          summary: analyze(
+                            filterRecords(snapshot.records, selectedFilter),
+                            selectedPricing,
+                          ),
+                          pricing:
+                            "Current configured/catalog standard text API-equivalent estimate, not actual billing",
+                          records: enrichedRecords(
+                            filterRecords(snapshot.records, selectedFilter),
+                            selectedPricing,
+                          ),
+                        },
+                        null,
+                        2,
+                      ),
                 ),
               );
               vscode.window.showInformationMessage("Usage metrics exported.");

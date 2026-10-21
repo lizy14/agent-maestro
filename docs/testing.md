@@ -50,6 +50,8 @@ The usage dashboard suites under src/test/usage cover streaming and non-streamin
 
 For dashboard UI review, invoke **Agent Maestro: Open Usage Dashboard**, change period/model/session filters, inspect the empty state, import a synthetic session_index.jsonl, forget imported names, and export a filtered view. Check light/dark themes, keyboard navigation, and a narrow editor column. Automated webview activation does not prove every native file-dialog or rendering path.
 
+Cost/performance tests cover exact pricing and aliases, long-context rates, cache read/write accounting, unknown-data coverage, formula-safe CSV, observed timing that excludes metadata and empty content, reasoning/single-chunk exclusions from emission rate, and cache-cohort pivots. Verify model × cache comparisons and dollar trends with synthetic data; these checks do not establish actual provider bills or GPU prefill/decode timings.
+
 Unit tests do not prove UI behavior or live provider compatibility. Record the AM revision, VS Code/client versions, model, isolated ports, expected output, and relevant AM logs for manual runs. Avoid sharing raw request/session logs without applying the [logging guidance](llm-compatibility.md#diagnostic-logs).
 
 - Use the [Codex collaboration runbook](codex-multi-agent-e2e.md) for Responses namespace/plaintext collaboration changes.

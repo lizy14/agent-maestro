@@ -17,7 +17,7 @@ const esbuildProblemMatcherPlugin = {
     });
     build.onEnd((result) => {
       result.errors.forEach(({ text, location }) => {
-        console.error(`✘ [ERROR] ${text}`);
+        console.error(`âœ˜ [ERROR] ${text}`);
         console.error(
           `    ${location.file}:${location.line}:${location.column}:`,
         );
@@ -40,7 +40,7 @@ async function main() {
     metafile: !production,
     // esbuild replaces `import.meta` with `{}` in CJS output, which breaks
     // dependencies that call `createRequire(import.meta.url)` (e.g. mcp-proxy
-    // via fastmcp) — `import.meta.url` becomes `undefined` and activation
+    // via fastmcp) â€” `import.meta.url` becomes `undefined` and activation
     // throws. Map it to `__filename`, which `createRequire` accepts as an
     // absolute path string.
     define: { "import.meta.url": "__filename" },
@@ -61,6 +61,7 @@ async function main() {
           JSON.stringify(result.metafile, null, 2),
         );
       }
+      fs.copyFileSync("src/usage/PRICING-NOTICE.md", "dist/PRICING-NOTICE.md");
       console.log("[build] build completed");
     });
     await ctx.dispose();

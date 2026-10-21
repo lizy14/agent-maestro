@@ -96,6 +96,47 @@
           "default": true,
           "description": "Record local model-call metrics for the usage dashboard. Stores no prompts, response content, credentials, or tool arguments.",
           "scope": "application"
+        },
+        "agent-maestro.usage.priceOverrides": {
+          "type": "object",
+          "default": {},
+          "scope": "application",
+          "description": "Exact model ID to USD per million text tokens. Estimates only; use your BYOK rates. Required input/output, optional cacheRead/cacheWrite. Overrides replace catalog rates.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "input",
+              "output"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": "number",
+                "minimum": 0
+              },
+              "output": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheRead": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheWrite": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "agent-maestro.usage.priceAliases": {
+          "type": "object",
+          "default": {},
+          "scope": "application",
+          "description": "Explicit exact model ID aliases for usage cost estimates. No fuzzy matching; unknown models remain unpriced.",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },

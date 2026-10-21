@@ -5,6 +5,8 @@ export interface UsageRecord {
   startedAt: number;
   durationMs: number;
   firstTokenMs?: number;
+  lastTokenMs?: number;
+  contentChunks?: number;
   endpoint: string;
   model: string;
   client: string;
@@ -55,6 +57,8 @@ export function parseRecord(value: unknown): UsageRecord | undefined {
     startedAt: row.startedAt as number,
     durationMs: row.durationMs as number,
     firstTokenMs: count(row.firstTokenMs),
+    lastTokenMs: count(row.lastTokenMs),
+    contentChunks: count(row.contentChunks),
     endpoint: boundedLabel(row.endpoint) ?? "unknown",
     model: boundedLabel(row.model) ?? "unknown",
     client: boundedLabel(row.client) ?? "other",
@@ -71,8 +75,13 @@ export function parseRecord(value: unknown): UsageRecord | undefined {
 
 export interface UsageFilter {
   since?: number;
+  until?: number;
   model?: string;
   session?: string;
+  client?: string;
+  outcome?: string;
+  cache?: string;
+  inputSize?: string;
 }
 export function sessionKey(row: UsageRecord): string {
   return row.sessionId
@@ -86,8 +95,30 @@ export function filterRecords(
   return rows.filter(
     (row) =>
       (!filter.since || row.startedAt >= filter.since) &&
+      (!filter.until || row.startedAt <= filter.until) &&
       (!filter.model || row.model === filter.model) &&
-      (!filter.session || sessionKey(row) === filter.session),
+      (!filter.session || sessionKey(row) === filter.session) &&
+      (!filter.client || row.client === filter.client) &&
+      (!filter.inputSize ||
+        (row.inputTokens === undefined
+          ? "unknown"
+          : row.inputTokens < 8000
+            ? "small"
+            : row.inputTokens < 32000
+              ? "medium"
+              : row.inputTokens < 128000
+                ? "large"
+                : "huge") === filter.inputSize) &&
+      (!filter.outcome || row.outcome === filter.outcome) &&
+      (!filter.cache ||
+        (row.inputTokens === undefined ||
+        row.inputTokens <= 0 ||
+        row.cachedTokens === undefined ||
+        row.cachedTokens > row.inputTokens
+          ? "unknown"
+          : row.cachedTokens > 0
+            ? "hit"
+            : "miss") === filter.cache),
   );
 }
 

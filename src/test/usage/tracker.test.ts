@@ -317,4 +317,41 @@ suite("Usage tracking through routes", () => {
     assert.strictEqual(records.length, 1);
     assert.strictEqual(records[0].outcome, "failed");
   });
+  test("monotonic timing ignores metadata and empty text; retains first/last content only", async () => {
+    let clock = 0;
+    const app = new OpenAPIHono();
+    app.use("*", usageMiddleware());
+    app.post("/v1/responses", async (c) => {
+      const client = model(async function* () {
+        clock = 100;
+        yield usage();
+        clock = 120;
+        yield new vscode.LanguageModelTextPart("");
+        clock = 200;
+        yield new vscode.LanguageModelTextPart("a");
+        clock = 400;
+        yield new vscode.LanguageModelTextPart("b");
+        clock = 600;
+        yield usage();
+        clock = 800;
+      });
+      const response = await sendTrackedRequest(
+        client,
+        [],
+        {},
+        undefined,
+        () => clock,
+      );
+      for await (const chunk of response.stream) {
+        void chunk;
+      }
+      return c.text("ok");
+    });
+    await app.request("/v1/responses", { method: "POST" });
+    assert.strictEqual(records.length, 1);
+    assert.strictEqual(records[0].firstTokenMs, 200);
+    assert.strictEqual(records[0].lastTokenMs, 400);
+    assert.strictEqual(records[0].durationMs, 800);
+    assert.strictEqual(records[0].contentChunks, 2);
+  });
 });

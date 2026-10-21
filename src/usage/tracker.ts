@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type * as vscode from "vscode";
 
 import { extractCopilotUsagePayload } from "../server/utils/copilotUsage";
@@ -77,6 +78,7 @@ export async function sendTrackedRequest(
   messages: vscode.LanguageModelChatMessage[],
   options?: vscode.LanguageModelChatRequestOptions,
   token?: vscode.CancellationToken,
+  clock: () => number = () => performance.now(),
 ): Promise<vscode.LanguageModelChatResponse> {
   const context = requestContext.getStore();
   if (!context || !sink || !enabled()) {
@@ -96,6 +98,7 @@ export async function sendTrackedRequest(
     sessionName: context.sessionName,
     outcome: "failed",
   };
+  const started = clock();
   let finished = false;
   let cancellation: vscode.Disposable | undefined;
   const finish = (outcome: UsageRecord["outcome"]) => {
@@ -104,7 +107,7 @@ export async function sendTrackedRequest(
     }
     finished = true;
     record.outcome = outcome;
-    record.durationMs = Date.now() - record.startedAt;
+    record.durationMs = Math.max(0, Math.round(clock() - started));
     cancellation?.dispose();
     context.signal.removeEventListener("abort", abort);
     // Metrics must never alter the outcome of a model request.
@@ -155,8 +158,18 @@ export async function sendTrackedRequest(
                 usage.completion_tokens_details?.reasoning_tokens,
               );
             }
-          } else if (record.firstTokenMs === undefined) {
-            record.firstTokenMs = Date.now() - record.startedAt;
+          } else if (
+            chunk &&
+            typeof chunk === "object" &&
+            (("value" in chunk &&
+              typeof chunk.value === "string" &&
+              chunk.value.length > 0) ||
+              ("callId" in chunk && typeof chunk.callId === "string"))
+          ) {
+            const elapsed = Math.max(0, Math.round(clock() - started));
+            record.firstTokenMs ??= elapsed;
+            record.lastTokenMs = elapsed;
+            record.contentChunks = (record.contentChunks ?? 0) + 1;
           }
           yield chunk;
         }
