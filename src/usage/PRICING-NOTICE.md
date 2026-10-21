@@ -1,31 +1,16 @@
-Pricing data derived from BerriAI/LiteLLM model_prices_and_context_window.json.
-Retrieved 2026-10-21; source URL and SHA-256 are recorded in prices.json.
+# Pricing source
 
-Portions of this software are licensed as follows:
+The bundled numeric rate table was transcribed from GitHub's official **Models and pricing for GitHub Copilot** documentation:
+https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
 
-- All content that resides under the "enterprise/" directory of this repository, if that directory exists, is licensed under the license defined in "enterprise/LICENSE".
-- Content outside of the above mentioned directories or restrictions above is available under the MIT license as defined below.
+Retrieved 2026-10-21. The source page SHA-256 is recorded in prices.json.
+Rates are USD per million tokens. GitHub documents one AI credit as $0.01 USD.
+Long-context thresholds and published promotional end dates are retained.
+Only numeric rates and model identifiers are included; no credentials are used.
 
----
-
-MIT License
-
-Copyright (c) 2023 Berri AI
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+VS Code's languageModelPricing proposal exposes optional AI-credit rates, but
+these are not a stable public API in the extension's supported VS Code typings.
+The extension therefore uses this dated fallback, with explicit user overrides
+and aliases taking precedence. Unknown models remain unpriced. Legacy premium
+request plans, auto-selection discounts, included allowances, and actual invoice
+charges cannot be inferred from these observations.

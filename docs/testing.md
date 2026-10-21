@@ -52,6 +52,10 @@ For dashboard UI review, invoke **Agent Maestro: Open Usage Dashboard**, change 
 
 Cost/performance tests cover exact pricing and aliases, long-context rates, cache read/write accounting, unknown-data coverage, formula-safe CSV, observed timing that excludes metadata and empty content, reasoning/single-chunk exclusions from emission rate, and cache-cohort pivots. Verify model × cache comparisons and dollar trends with synthetic data; these checks do not establish actual provider bills or GPU prefill/decode timings.
 
+Automatic session-name fixtures verify explicit-home/environment/default path precedence, rename refresh, partial JSONL appends, missing/oversized files, and cache invalidation. Disable automatic discovery in the isolated test profile so extension-activation tests do not read real local metadata. Pricing fixtures pin values from GitHub's official table and cover exact long-context thresholds and promotional expiry. No authenticated pricing endpoints are called.
+
+Credit-usage tests mock the GitHub API and cover account/month validation, unit checks, discounts, snapshot replacement, missing quota, UTC reset/leap-year boundaries, stale/missing series, and above/below-limit run-rate projection. Billing polling is disabled in the isolated test profile. The GitHub API exposes usage, not the account's allowance; no live quota or forecast accuracy is established by these tests.
+
 Unit tests do not prove UI behavior or live provider compatibility. Record the AM revision, VS Code/client versions, model, isolated ports, expected output, and relevant AM logs for manual runs. Avoid sharing raw request/session logs without applying the [logging guidance](llm-compatibility.md#diagnostic-logs).
 
 - Use the [Codex collaboration runbook](codex-multi-agent-e2e.md) for Responses namespace/plaintext collaboration changes.

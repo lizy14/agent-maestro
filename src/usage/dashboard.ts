@@ -8,8 +8,16 @@ import {
   enrichedRecords,
   exportCsv,
 } from "./analytics";
+import {
+  CreditView,
+  fetchCreditSnapshot,
+  monthToDate,
+  retainSnapshots,
+  validSnapshot,
+} from "./credits";
 import { dashboardHtml } from "./dashboardHtml";
 import { UsageFilter, filterRecords, parseSessionNames } from "./model";
+import { CodexSessionNames, codexSessionIndex } from "./sessionNames";
 import { UsageStore } from "./store";
 
 export function registerUsageDashboard(
@@ -21,6 +29,107 @@ export function registerUsageDashboard(
   let filter: UsageFilter = {};
   let generation = 0;
   let display: DashboardOptions = {};
+  const sessionNames = new CodexSessionNames();
+  let lastAutomaticNames = "";
+  let lastCreditAttempt = 0;
+  let creditBusy = false;
+  let creditStatus =
+    "Sync uses the official GitHub API through your existing CLI login. Monthly allowance must be configured; the API does not expose quota.";
+  const creditView = (): CreditView => {
+    const config = vscode.workspace.getConfiguration("agent-maestro");
+    const scope = config.get<"user" | "organization">(
+      "usage.githubCredits.scope",
+      "user",
+    );
+    const org = config
+      .get<string>("usage.githubCredits.organization", "")
+      .toLowerCase();
+    const all = context.globalState
+      .get<unknown[]>("usage.creditSnapshots", [])
+      .filter(validSnapshot);
+    const lastAccount = context.globalState.get<string>(
+      "usage.creditAccount",
+      "",
+    );
+    return {
+      enabled: config.get("usage.githubCredits.enabled", false),
+      status: creditStatus,
+      snapshots: all.filter(
+        (row) =>
+          row.scope === scope &&
+          row.account === (scope === "organization" ? org : lastAccount),
+      ),
+    };
+  };
+  const syncCredits = async () => {
+    if (creditBusy) {
+      return;
+    }
+    creditBusy = true;
+    lastCreditAttempt = Date.now();
+    try {
+      const config = vscode.workspace.getConfiguration("agent-maestro");
+      const snapshot = await fetchCreditSnapshot(
+        config.get("usage.githubCredits.scope", "user"),
+        config.get("usage.githubCredits.organization", ""),
+        config.get("usage.githubCredits.monthlyAllowance", 0),
+      );
+      await context.globalState.update(
+        "usage.creditSnapshots",
+        retainSnapshots(
+          context.globalState.get<unknown[]>("usage.creditSnapshots", []),
+          snapshot,
+        ),
+      );
+      if (snapshot.scope === "user") {
+        await context.globalState.update(
+          "usage.creditAccount",
+          snapshot.account,
+        );
+      }
+      creditStatus =
+        "Official GitHub billing usage synchronized. Allowance is user-configured, not discovered from GitHub.";
+    } catch (error) {
+      creditStatus =
+        error instanceof Error ? error.message : "GitHub usage unavailable.";
+    } finally {
+      creditBusy = false;
+    }
+  };
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("agent-maestro.usage")) {
+        lastCreditAttempt = 0;
+        void refresh();
+      }
+    }),
+  );
+  const automaticNames = async () => {
+    const config = vscode.workspace.getConfiguration("agent-maestro");
+    if (!config.get("usage.autoSessionNames", true)) {
+      sessionNames.clear();
+      return { names: {}, status: "Automatic Codex session names disabled." };
+    }
+    try {
+      const result = await sessionNames.read(
+        codexSessionIndex(config.get<string>("usage.codexHome", "")),
+      );
+      const status =
+        result.status === "loaded"
+          ? Object.keys(result.names).length +
+            " Codex session names found automatically."
+          : result.status === "missing"
+            ? "Codex session metadata not found on this extension host. Set Codex Home in session name settings for a different location."
+            : "Codex session metadata is unavailable or exceeds 5 MiB. Check session name settings.";
+      return { names: result.names, status };
+    } catch {
+      return {
+        names: {},
+        status:
+          "Codex Home must be an absolute directory. Check session name settings.",
+      };
+    }
+  };
   const pricing = () => ({
     overrides: vscode.workspace
       .getConfiguration("agent-maestro")
@@ -37,15 +146,19 @@ export function registerUsageDashboard(
     }
     try {
       const snapshot = await store.read();
+      const automatic = await automaticNames();
       if (current !== panel || revision !== generation) {
         return;
       }
-      const names = context.globalState.get<Record<string, string>>(
+      const imported = context.globalState.get<Record<string, string>>(
         "usage.sessionNames",
         {},
       );
+      const names = { ...automatic.names, ...imported };
+      lastAutomaticNames = JSON.stringify(automatic);
       if (days) {
-        filter.since = Date.now() - days * 86400000;
+        filter.since =
+          days === -1 ? monthToDate() : Date.now() - days * 86400000;
         filter.until = undefined;
       }
       current.webview.html = dashboardHtml(
@@ -59,7 +172,12 @@ export function registerUsageDashboard(
           .getConfiguration("agent-maestro")
           .get("usage.enabled", true),
         snapshot.truncated,
-        { ...display, pricing: pricing() },
+        {
+          ...display,
+          pricing: pricing(),
+          namesStatus: automatic.status,
+          credits: creditView(),
+        },
       );
     } catch {
       vscode.window.showErrorMessage(
@@ -101,7 +219,7 @@ export function registerUsageDashboard(
             bucket?: DashboardOptions["bucket"];
           };
           if (
-            ![0, 1, 7, 30].includes(data.days ?? -1) ||
+            ![-1, 0, 1, 7, 30].includes(data.days ?? -2) ||
             typeof data.model !== "string" ||
             data.model.length > 160 ||
             typeof data.session !== "string" ||
@@ -162,7 +280,12 @@ export function registerUsageDashboard(
             outcome: data.outcome,
             cache: data.cache,
             inputSize: data.inputSize,
-            since: days ? Date.now() - days * 86400000 : data.since,
+            since:
+              days === -1
+                ? monthToDate()
+                : days
+                  ? Date.now() - days * 86400000
+                  : data.since,
             until: days ? undefined : data.until,
           };
           display = {
@@ -171,6 +294,31 @@ export function registerUsageDashboard(
             bucket: data.bucket,
           };
           try {
+            if (data.type === "syncCredits") {
+              await syncCredits();
+              await refresh();
+            }
+            if (data.type === "creditSettings") {
+              await vscode.commands.executeCommand(
+                "workbench.action.openSettings",
+                "agent-maestro.usage.githubCredits",
+              );
+            }
+            if (data.type === "clearCredits") {
+              const answer = await vscode.window.showWarningMessage(
+                "Clear locally saved AI-credit usage snapshots?",
+                { modal: true },
+                "Clear",
+              );
+              if (answer === "Clear") {
+                await context.globalState.update(
+                  "usage.creditSnapshots",
+                  undefined,
+                );
+                creditStatus = "Local credit history cleared.";
+                await refresh();
+              }
+            }
             if (data.type === "refresh" || data.type === "filter") {
               await refresh();
             }
@@ -206,6 +354,12 @@ export function registerUsageDashboard(
               await vscode.commands.executeCommand(
                 "workbench.action.openSettings",
                 "agent-maestro.usage.price",
+              );
+            }
+            if (data.type === "nameSettings") {
+              await vscode.commands.executeCommand(
+                "workbench.action.openSettings",
+                "@ext:Joouis.agent-maestro usage",
               );
             }
             if (data.type === "export" || data.type === "csv") {
@@ -258,7 +412,37 @@ export function registerUsageDashboard(
           }
         },
       );
+      let checking = false;
+      const timer = setInterval(async () => {
+        if (!panel?.visible || checking) {
+          return;
+        }
+        checking = true;
+        try {
+          if (
+            creditView().enabled &&
+            Date.now() - lastCreditAttempt >= 30 * 60000
+          ) {
+            await syncCredits();
+            await refresh();
+          }
+          if (JSON.stringify(await automaticNames()) !== lastAutomaticNames) {
+            await refresh();
+          }
+        } finally {
+          checking = false;
+        }
+      }, 30000);
+      const visibility = panel.onDidChangeViewState((event) => {
+        if (event.webviewPanel.visible) {
+          void refresh();
+        }
+      });
       panel.onDidDispose(() => {
+        clearInterval(timer);
+        visibility.dispose();
+        sessionNames.clear();
+        lastAutomaticNames = "";
         messages.dispose();
         panel = undefined;
         generation++;

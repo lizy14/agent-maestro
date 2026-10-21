@@ -103,7 +103,7 @@ export class UsageStore {
       retained += file.size;
       const age = Date.now() - file.modified;
       // Other VS Code windows can still append to their current segment.
-      if (age > 30 * DAY || (retained > MAX_BYTES && age > 3600000)) {
+      if (age > 31 * DAY || (retained > MAX_BYTES && age > 3600000)) {
         await fs.unlink(path.join(this.directory, file.name)).catch(() => {});
       }
     }
@@ -147,7 +147,7 @@ export class UsageStore {
           const row = parseRecord(JSON.parse(line));
           if (
             row &&
-            row.startedAt >= Date.now() - 30 * DAY &&
+            row.startedAt >= Date.now() - 31 * DAY &&
             !ids.has(row.id)
           ) {
             records.push(row);

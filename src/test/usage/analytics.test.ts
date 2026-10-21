@@ -74,16 +74,55 @@ suite("Usage performance and USD analytics", () => {
     );
   });
   test("catalog uses exact aliases and long-context thresholds", () => {
-    const standard = modelPrice("gpt-5.5", 1000)!;
-    const long = modelPrice("gpt-5.5", 300000)!;
+    const standard = modelPrice("gpt-6.1-sol", 1000)!;
+    const long = modelPrice("gpt-6.1-sol", 300000)!;
     assert.ok(standard && long);
     assert.ok(long.rates.input > standard.rates.input);
-    assert.strictEqual(modelPrice("gpt-5.5-custom", 1000), undefined);
+    assert.strictEqual(modelPrice("gpt-6.1-sol-custom", 1000), undefined);
     assert.deepStrictEqual(
-      modelPrice("custom", 1000, { aliases: { custom: "gpt-5.5" } }),
+      modelPrice("custom", 1000, { aliases: { custom: "gpt-6.1-sol" } }),
       standard,
     );
     assert.strictEqual(modelPrice("__proto__", 1000), undefined);
+  });
+  test("official Copilot fallback preserves exact rates, thresholds and promotional expiry", () => {
+    const now = Date.UTC(2026, 9, 21);
+    assert.deepStrictEqual(modelPrice("gpt-6.1-sol", 272000, {}, now)!.rates, {
+      input: 2,
+      output: 10,
+      cacheRead: 0.1,
+      cacheWrite: 2.5,
+    });
+    assert.deepStrictEqual(modelPrice("gpt-6.1-sol", 272001, {}, now)!.rates, {
+      input: 4,
+      output: 15,
+      cacheRead: 0.2,
+      cacheWrite: 5,
+    });
+    assert.strictEqual(
+      modelPrice("claude-sonnet-4-6", 1000, {}, now)!.rates.cacheWrite,
+      3.75,
+    );
+    assert.ok(
+      modelPrice("gpt-6-astra", 1000, {}, now)!.source.includes(
+        "docs.github.com",
+      ),
+    );
+    assert.strictEqual(
+      modelPrice("gemini-4-argon", 1000, {}, Date.UTC(2026, 11, 1)),
+      undefined,
+    );
+    assert.ok(modelPrice("gemini-4-argon", 1000, {}, Date.UTC(2026, 10, 30)));
+    assert.strictEqual(modelPrice("gpt-5.5", 1000, {}, now), undefined);
+    assert.strictEqual(
+      modelPrice(
+        "gpt-6.1-sol",
+        500000,
+        { overrides: { "gpt-6.1-sol": { input: 1, output: 2 } } },
+        now,
+      )!.rates.input,
+      1,
+    );
   });
   test("throughput excludes failed/zero-time and emission excludes reasoning or buffered calls", () => {
     assert.strictEqual(callThroughput(row()), 50);

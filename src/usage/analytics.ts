@@ -1,3 +1,4 @@
+import type { CreditView } from "./credits";
 import { UsageRecord, sessionKey, summarize } from "./model";
 import catalog from "./prices.json";
 
@@ -12,7 +13,14 @@ export interface PricingOptions {
   aliases?: Record<string, string>;
 }
 export const PRICE_DATE = catalog.retrieved;
-const prices = catalog.models as Record<string, Record<string, number>>;
+interface CatalogPrice {
+  rates: ModelPrice;
+  threshold?: number;
+  longContext?: ModelPrice;
+  validUntil?: string;
+}
+const prices = catalog.models as Record<string, CatalogPrice>;
+const aliases = catalog.aliases as Record<string, string>;
 const rate = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
 
@@ -20,6 +28,7 @@ export function modelPrice(
   model: string,
   input: number,
   options: PricingOptions = {},
+  at = Date.now(),
 ): { rates: ModelPrice; source: string } | undefined {
   const alias =
     options.aliases && Object.hasOwn(options.aliases, model)
@@ -46,45 +55,31 @@ export function modelPrice(
       source: "Configured USD / million tokens: " + alias,
     };
   }
-  if (!Object.hasOwn(prices, alias)) {
+  const canonical = Object.hasOwn(aliases, alias) ? aliases[alias] : alias;
+  if (!Object.hasOwn(prices, canonical)) {
     return undefined;
   }
-  const entry = prices[alias];
-  let suffix = "",
-    threshold = 0;
-  for (const key of Object.keys(entry)) {
-    const match = /^input_cost_per_token_above_(\d+)k_tokens$/.exec(key);
-    if (
-      match &&
-      input > Number(match[1]) * 1000 &&
-      Number(match[1]) > threshold
-    ) {
-      threshold = Number(match[1]);
-      suffix = "_above_" + threshold + "k_tokens";
-    }
-  }
-  const get = (key: string) => {
-    const value = entry[key + suffix] ?? entry[key];
-    return rate(value) ? value * 1e6 : undefined;
-  };
-  const inputRate = get("input_cost_per_token"),
-    outputRate = get("output_cost_per_token");
-  if (inputRate === undefined || outputRate === undefined) {
+  const entry = prices[canonical];
+  if (
+    entry.validUntil &&
+    at >= Date.parse(entry.validUntil + "T00:00:00Z") + 86400000
+  ) {
     return undefined;
   }
+  const long =
+    entry.threshold !== undefined &&
+    input > entry.threshold &&
+    entry.longContext;
   return {
-    rates: {
-      input: inputRate,
-      output: outputRate,
-      cacheRead: get("cache_read_input_token_cost"),
-      cacheWrite: get("cache_creation_input_token_cost"),
-    },
+    rates: long || entry.rates,
     source:
-      "LiteLLM standard text rates " +
+      "GitHub Copilot official model rates " +
       PRICE_DATE +
       ": " +
-      alias +
-      (suffix ? " (long context)" : ""),
+      canonical +
+      (long ? " (long context)" : "") +
+      " — " +
+      catalog.source,
   };
 }
 
@@ -107,9 +102,9 @@ export function inputBucket(row: UsageRecord): string {
   return row.inputTokens < 8000
     ? "<8k"
     : row.inputTokens < 32000
-      ? "8k–32k"
+      ? "8kâ€“32k"
       : row.inputTokens < 128000
-        ? "32k–128k"
+        ? "32kâ€“128k"
         : "128k+";
 }
 
@@ -128,7 +123,7 @@ export function estimateCost(row: UsageRecord, options: PricingOptions = {}) {
   if (cached + writes > input) {
     return undefined;
   }
-  const price = modelPrice(row.model, input, options);
+  const price = modelPrice(row.model, input, options, row.startedAt);
   if (
     !price ||
     (cached > 0 && price.rates.cacheRead === undefined) ||
@@ -248,6 +243,8 @@ export interface DashboardOptions {
   pivot?: Pivot;
   metric?: TrendMetric;
   bucket?: "day" | "hour";
+  namesStatus?: string;
+  credits?: CreditView;
 }
 export function enrichedRecords(
   rows: UsageRecord[],

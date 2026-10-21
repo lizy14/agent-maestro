@@ -8,6 +8,7 @@ import {
   estimateCost,
   pivotRows,
 } from "./analytics";
+import { creditsHtml } from "./creditsHtml";
 import {
   UsageFilter,
   UsageRecord,
@@ -402,12 +403,13 @@ export function dashboardHtml(
     nonce +
     '">' +
     "body{margin:0;padding:28px;background:var(--vscode-editor-background,#181b23);color:var(--vscode-editor-foreground,#e6e9f0);font:14px var(--vscode-font-family,system-ui)}*{box-sizing:border-box}h1{font-size:26px;margin:6px 0}h2{font-size:17px;margin:0 0 16px}header{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}.muted,small{color:var(--vscode-descriptionForeground,#a3adbd);line-height:1.6}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:var(--vscode-textLink-foreground,#79b8ff)}.actions,.filters{display:flex;gap:10px;flex-wrap:wrap}.filters{margin:24px 0;align-items:end}label{display:flex;flex-direction:column;gap:6px}button,select,input{font:inherit;padding:8px 10px;border-radius:5px;border:1px solid var(--vscode-widget-border,#41495b);color:inherit;background:var(--vscode-dropdown-background,#252b38)}select{max-width:330px}button{cursor:pointer}button:hover{background:var(--vscode-list-hoverBackground,#343e50)}:focus-visible{outline:2px solid var(--vscode-focusBorder,#79b8ff)}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}.card,section{border:1px solid var(--vscode-widget-border,#373f50);border-radius:8px;padding:18px;background:var(--vscode-sideBar-background,#1e2430)}.card strong{display:block;font-size:28px;font-weight:600;margin:10px 0}.card small{font-size:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}section{margin-top:16px}.grid section{margin:0}.table-wrap{overflow:auto;max-height:420px}table{border-collapse:collapse;width:100%;font-size:13px}td,th{text-align:left;padding:10px;border-bottom:1px solid var(--vscode-widget-border,#373f50);white-space:nowrap}th{font-weight:500;color:var(--vscode-descriptionForeground,#a3adbd)}td:first-child{white-space:normal;overflow-wrap:anywhere;min-width:110px;max-width:330px}svg{width:100%;height:180px}.axis{font-size:9px;fill:var(--vscode-descriptionForeground,#a3adbd)}.input{fill:var(--vscode-charts-blue,#6aa5ff)}.cache{fill:var(--vscode-charts-green,#52c7a1)}footer{font-size:12px;margin-top:22px}.empty{padding:24px;text-align:center}@media(max-width:800px){body{padding:16px}.grid{grid-template-columns:1fr}}" +
-    '</style></head><body><header><div><div class="eyebrow">Agent Maestro / Local analytics</div><h1>Usage dashboard</h1><div class="muted">Model calls routed through this extension host. No external telemetry.</div></div><div class="actions"><button id="refresh">Refresh</button><button id="import">Import Codex session names</button><button id="forget">Forget imported names</button><button id="pricing">Configure prices</button><button id="export">Export JSON</button><button id="csv">Export CSV</button></div></header><div class="filters"><label>Period<select id="period">' +
+    '</style></head><body><header><div><div class="eyebrow">Agent Maestro / Local analytics</div><h1>Usage dashboard</h1><div class="muted">Model calls routed through this extension host. No external telemetry.</div></div><div class="actions"><button id="refresh">Refresh</button><button id="nameSettings">Session name settings</button><button id="import">Choose metadata file</button><button id="forget">Forget imported names</button><button id="pricing">Configure prices</button><button id="export">Export JSON</button><button id="csv">Export CSV</button></div></header><div class="filters"><label>Period<select id="period">' +
     options(
       [
         ["1", "Last 24 hours"],
         ["7", "Last 7 days"],
         ["30", "Last 30 days"],
+        ["-1", "Month to date (UTC)"],
         ["0", "Custom range"],
       ],
       String(days),
@@ -495,6 +497,9 @@ export function dashboardHtml(
         : "",
     ) +
     '"></label><button id="dates">Apply dates</button></div>' +
+    '<p class="muted">' +
+    escapeHtml(display.namesStatus ?? "") +
+    "</p>" +
     '<p class="muted" role="status">' +
     (enabled ? "Collection enabled. " : "Collection disabled. ") +
     (truncated ? "Showing a capped history window. " : "") +
@@ -507,6 +512,7 @@ export function dashboardHtml(
     (rows.length
       ? ""
       : '<p class="empty">No calls in this view. Send a request through Agent Maestro or change the filters.</p>') +
+    creditsHtml(display.credits) +
     '<div class="filters"><label>Trend<select id="metric">' +
     options(
       [
@@ -648,12 +654,12 @@ export function dashboardHtml(
         ]),
     ) +
     "</section>" +
-    '<footer class="muted">Provider-reported tokens only; missing counts are —. Reasoning is included in output. Cache hit is cached input ÷ input on calls with reported cache counts. USD is a standard text API-equivalent estimate, not a Copilot bill; priced coverage excludes unknown models/cache usage. Configure per-model USD-per-million overrides or aliases for BYOK. Bundled rates: ' +
+    '<footer class="muted">Provider-reported tokens only; missing counts are —. Reasoning is included in output. Cache hit is cached input ÷ input on calls with reported cache counts. USD uses GitHub Copilot official documented rates or configured overrides, not an invoice; priced coverage excludes unknown models/cache usage. Configure per-model USD-per-million overrides or aliases for BYOK. Official GitHub rate snapshot: ' +
     PRICE_DATE +
-    '. TTFT includes queue/network/hidden reasoning and is not prefill time. Emission is output tokens divided by first-to-last content time only for completed multi-chunk calls with reported zero reasoning; it is not GPU decode speed. Percentiles pool calls, not per-session averages. Retention: 30 days / approximately 100 MiB; newest 50,000 records. Only traffic passing through Maestro is observed.</footer><script nonce="' +
+    '. TTFT includes queue/network/hidden reasoning and is not prefill time. Emission is output tokens divided by first-to-last content time only for completed multi-chunk calls with reported zero reasoning; it is not GPU decode speed. Percentiles pool calls, not per-session averages. Retention: 31 days / approximately 100 MiB; newest 50,000 records. Only traffic passing through Maestro is observed.</footer><script nonce="' +
     nonce +
     '">' +
-    'const vscode=acquireVsCodeApi();const value=id=>document.getElementById(id).value;const filters=()=>({days:Number(value("period")),model:value("model"),session:value("session"),client:value("client"),outcome:value("outcome"),cache:value("cache"),inputSize:value("inputSize"),metric:value("metric"),bucket:value("bucket"),pivot:value("pivot"),since:value("from")?new Date(value("from")).getTime():undefined,until:value("to")?new Date(value("to")).getTime():undefined});for(const id of ["period","model","session","client","outcome","cache","inputSize","metric","bucket","pivot"]){document.getElementById(id).addEventListener("change",()=>vscode.postMessage({type:"filter",...filters()}));}document.getElementById("dates").addEventListener("click",()=>vscode.postMessage({type:"filter",...filters(),days:0}));for(const [id,type] of [["refresh","refresh"],["import","importNames"],["forget","forgetNames"],["pricing","pricing"],["export","export"],["csv","csv"]]){document.getElementById(id).addEventListener("click",()=>vscode.postMessage({type,...filters()}));}' +
+    'const vscode=acquireVsCodeApi();const value=id=>document.getElementById(id).value;const filters=()=>({days:Number(value("period")),model:value("model"),session:value("session"),client:value("client"),outcome:value("outcome"),cache:value("cache"),inputSize:value("inputSize"),metric:value("metric"),bucket:value("bucket"),pivot:value("pivot"),since:value("from")?new Date(value("from")).getTime():undefined,until:value("to")?new Date(value("to")).getTime():undefined});for(const id of ["period","model","session","client","outcome","cache","inputSize","metric","bucket","pivot"]){document.getElementById(id).addEventListener("change",()=>vscode.postMessage({type:"filter",...filters()}));}document.getElementById("dates").addEventListener("click",()=>vscode.postMessage({type:"filter",...filters(),days:0}));for(const [id,type] of [["syncCredits","syncCredits"],["creditSettings","creditSettings"],["clearCredits","clearCredits"],["refresh","refresh"],["nameSettings","nameSettings"],["import","importNames"],["forget","forgetNames"],["pricing","pricing"],["export","export"],["csv","csv"]]){document.getElementById(id).addEventListener("click",()=>vscode.postMessage({type,...filters()}));}' +
     "</script></body></html>"
   );
 }

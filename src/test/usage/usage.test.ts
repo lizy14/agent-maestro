@@ -138,7 +138,7 @@ suite("Usage journal", () => {
   test("prunes only owned journals and retains unrelated files", async () => {
     const file = path.join(directory, "usage-1-abc-0.jsonl");
     await fs.writeFile(file, JSON.stringify(record("old")) + "\n");
-    const old = new Date(Date.now() - 31 * 86400000);
+    const old = new Date(Date.now() - 32 * 86400000);
     await fs.utimes(file, old, old);
     await fs.writeFile(path.join(directory, "unrelated.jsonl"), "keep");
     assert.strictEqual(
