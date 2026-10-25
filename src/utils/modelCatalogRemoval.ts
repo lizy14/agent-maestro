@@ -1,7 +1,12 @@
 import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 
-import { DSH_MANAGED_BLOCK_END, DSH_MANAGED_BLOCK_START } from "./dshSettings";
+import {
+  DSH_MANAGED_BLOCK_END,
+  DSH_MANAGED_BLOCK_START,
+  getDshSettingsPath,
+} from "./dshSettings";
 import { logger } from "./logger";
 import {
   CatalogTarget,
@@ -324,12 +329,81 @@ function parseRemovalCatalog(
   return { lines, rows, protectedIds };
 }
 
+function homePatchReferences(target: CatalogTarget): Set<string> {
+  const references = new Set<string>();
+  if (target.kind !== "dsh") {
+    return references;
+  }
+  const profileRoot = path.dirname(path.dirname(path.dirname(target.path)));
+  const home =
+    path.basename(path.dirname(path.dirname(target.path))) === "profiles"
+      ? profileRoot
+      : path.basename(target.path) === "settings.yaml"
+        ? path.dirname(target.path)
+        : path.dirname(getDshSettingsPath());
+  const homePatch = path.join(home, "cordis.patch.yml");
+  let content: string;
+  try {
+    const stat = fs.lstatSync(homePatch);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error("DSH home patch is not a regular file");
+    }
+    content = fs.readFileSync(homePatch, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return references;
+    }
+    throw error;
+  }
+  const scopes: { indent: number; keys: Set<string> }[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed === "[]") {
+      continue;
+    }
+    const list = line.match(
+      /^\s*-\s+("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[a-zA-Z0-9_.:/-]+)\s*$/,
+    );
+    if (list) {
+      references.add(scalar(list[1]));
+      continue;
+    }
+    const field = line.match(/^\s*(?:-\s+)?[a-zA-Z0-9_-]+:\s*(.*?)\s*$/);
+    if (!field) {
+      throw new Error("Complex DSH home patch requires manual removal");
+    }
+    const key = line.match(/^\s*(?:-\s+)?([a-zA-Z0-9_-]+):/)![1];
+    const indent = line.search(/\S/) + (trimmed.startsWith("- ") ? 2 : 0);
+    while (scopes.length && scopes[scopes.length - 1].indent > indent) {
+      scopes.pop();
+    }
+    if (trimmed.startsWith("- ") && scopes.at(-1)?.indent === indent) {
+      scopes.pop();
+    }
+    if (scopes.at(-1)?.indent !== indent) {
+      scopes.push({ indent, keys: new Set() });
+    }
+    if (scopes.at(-1)!.keys.has(key)) {
+      throw new Error("Duplicate DSH home patch fields require manual removal");
+    }
+    scopes.at(-1)!.keys.add(key);
+    if (field[1]) {
+      references.add(scalar(field[1]));
+    }
+  }
+  return references;
+}
+
 export function planCatalogRemoval(
   target: CatalogTarget,
   original: string,
   absentRouteIds: ReadonlySet<string>,
+  eligibleRouteIds: ReadonlySet<string> = absentRouteIds,
 ): CatalogRemovalPlan {
   const parsed = parseRemovalCatalog(target, original);
+  for (const reference of homePatchReferences(target)) {
+    parsed.protectedIds.add(reference);
+  }
   const owned = parsed.rows.filter((row) => row.owned);
   for (const reference of parsed.protectedIds) {
     if (reference.endsWith("[1m]")) {
@@ -350,7 +424,10 @@ export function planCatalogRemoval(
     target,
     original,
     candidates: absentOwned
-      .filter((row) => !parsed.protectedIds.has(row.id))
+      .filter(
+        (row) =>
+          eligibleRouteIds.has(row.id) && !parsed.protectedIds.has(row.id),
+      )
       .map(({ id, name }) => ({ id, name })),
   };
 }
@@ -363,6 +440,9 @@ export function removeCatalogModels(
     throw new Error(plan.blockedReason);
   }
   const parsed = parseRemovalCatalog(plan.target, plan.original);
+  for (const reference of homePatchReferences(plan.target)) {
+    parsed.protectedIds.add(reference);
+  }
   for (const reference of parsed.protectedIds) {
     if (reference.endsWith("[1m]")) {
       parsed.protectedIds.add(reference.slice(0, -4));
@@ -489,7 +569,17 @@ export class ModelRemovalMonitor {
     for (const target of findCatalogTargets(this.context)) {
       try {
         const original = fs.readFileSync(target.path, "utf8");
-        const plan = planCatalogRemoval(target, original, stable);
+        const absentCatalogIds = new Set(
+          parseRemovalCatalog(target, original)
+            .rows.filter((row) => !present.has(row.id))
+            .map((row) => row.id),
+        );
+        const plan = planCatalogRemoval(
+          target,
+          original,
+          absentCatalogIds,
+          stable,
+        );
         plan.candidates = plan.candidates.filter(
           (row) => !this.handled.has(`${target.path}\0${row.id}`),
         );
@@ -587,7 +677,21 @@ export class ModelRemovalMonitor {
         ) {
           throw new Error("Catalog is no longer available in this workspace");
         }
-        const updated = removeCatalogModels(plan, ids);
+        const absentCatalogIds = new Set(
+          parseRemovalCatalog(plan.target, plan.original)
+            .rows.filter((row) => !live.has(row.id))
+            .map((row) => row.id),
+        );
+        const verifiedPlan = planCatalogRemoval(
+          plan.target,
+          plan.original,
+          absentCatalogIds,
+          ids,
+        );
+        if (verifiedPlan.blockedReason) {
+          throw new Error(verifiedPlan.blockedReason);
+        }
+        const updated = removeCatalogModels(verifiedPlan, ids);
         writeCatalogUpdate(plan.target, plan.original, updated);
         if (updated !== plan.original) {
           count++;

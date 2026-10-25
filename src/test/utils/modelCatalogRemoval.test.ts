@@ -21,6 +21,23 @@ import { CatalogTarget, modelToDshConfig } from "../../utils/modelCatalogs";
 import { modelRouteId } from "../../utils/modelIdentity";
 
 suite("Optional unavailable model catalog removal", () => {
+  let suiteHome: string;
+  let originalHome: string | undefined;
+  suiteSetup(() => {
+    originalHome = process.env.DSH_HOME;
+    suiteHome = fs.mkdtempSync(path.join(os.tmpdir(), "am-removal-plan-"));
+    process.env.DSH_HOME = suiteHome;
+  });
+  suiteTeardown(() => {
+    if (originalHome === undefined) {
+      delete process.env.DSH_HOME;
+    } else {
+      process.env.DSH_HOME = originalHome;
+    }
+    assert.strictEqual(path.dirname(suiteHome), os.tmpdir());
+    assert.ok(path.basename(suiteHome).startsWith("am-removal-plan-"));
+    fs.rmSync(suiteHome, { recursive: true, force: true });
+  });
   const model = (id: string, vendor = "copilot") =>
     ({
       id,
@@ -246,6 +263,36 @@ suite("Optional unavailable model catalog removal", () => {
     assert.deepStrictEqual(plan.candidates, []);
     assert.throws(() => removeCatalogModels(plan, absent("m1")), /half/);
   });
+  test("eligible routes limit candidates without weakening full-absence safety", () => {
+    const original = generated();
+    const eligible = absent("m1", "m4");
+    const modest = planCatalogRemoval(
+      target,
+      original,
+      absent("m1", "m2"),
+      eligible,
+    );
+    assert.strictEqual(modest.blockedReason, undefined);
+    assert.deepStrictEqual(
+      modest.candidates.map((row) => row.id),
+      ["m1"],
+    );
+    assert.deepStrictEqual(
+      planCatalogRemoval(target, original, absent("m1", "m2")).candidates.map(
+        (row) => row.id,
+      ),
+      ["m1", "m2"],
+    );
+    const blocked = planCatalogRemoval(
+      target,
+      original,
+      absent("m1", "m2", "m3"),
+      eligible,
+    );
+    assert.match(blocked.blockedReason!, /half/);
+    assert.deepStrictEqual(blocked.candidates, []);
+    assert.throws(() => removeCatalogModels(blocked, absent("m1")), /half/);
+  });
   test("a last remaining catalog entry is never removed", () => {
     const plan = planCatalogRemoval(
       target,
@@ -433,6 +480,202 @@ suite("Optional unavailable model catalog removal", () => {
         () => false,
       );
     const live = () => models().filter((item) => item.id !== "m1");
+    const homeDefault = (id: string) =>
+      `- id: agent-default-model\n  name: "@deepseek-ai/dsh-agent-default-model"\n  config:\n    provider: agent-maestro\n    model: "${id}"\n`;
+    const allowRemoval = () => {
+      mock(vscode.window, "showInformationMessage", async (message: string) =>
+        message.startsWith("Previously")
+          ? "Review unavailable models"
+          : undefined,
+      );
+    };
+    const observePersistentLoss = async (
+      monitor: ModelRemovalMonitor,
+      baseline = models(),
+      missing = live(),
+    ) => {
+      await check(monitor, baseline);
+      await check(monitor, missing);
+      now += REMOVAL_CONFIRM_DELAY_MS;
+      await check(monitor, missing);
+      now += 5 * 60 * 1000;
+      await check(monitor, missing);
+    };
+    test("staggered half-catalog loss blocks prompts despite only one confidence-eligible route", async () => {
+      const monitor = new ModelRemovalMonitor(context, () => now);
+      const baseline = models(20);
+      const original = fs.readFileSync(pathToCatalog, "utf8");
+      const firstLoss = baseline.filter((item) => item.id !== "m1");
+      const halfCatalogLoss = baseline.filter(
+        (item) => !["m1", "m2", "m3"].includes(item.id),
+      );
+      assert.strictEqual(
+        inventoryRemovalBlock(
+          modelInventory(baseline),
+          modelInventory(halfCatalogLoss),
+        ),
+        undefined,
+      );
+      await check(monitor, baseline);
+      await check(monitor, firstLoss);
+      now += REMOVAL_CONFIRM_DELAY_MS;
+      await check(monitor, firstLoss);
+      now += 5 * 60 * 1000;
+      await check(monitor, halfCatalogLoss);
+      assert.strictEqual(prompts, 0);
+      assert.strictEqual(selectedCalls, 0);
+      assert.strictEqual(fs.readFileSync(pathToCatalog, "utf8"), original);
+      assert.deepStrictEqual(fs.readdirSync(path.dirname(pathToCatalog)), [
+        "cordis.patch.yml",
+      ]);
+    });
+    test("final query half-catalog loss blocks the selected write and backup", async () => {
+      const monitor = new ModelRemovalMonitor(context, () => now);
+      const baseline = models(20);
+      const original = fs.readFileSync(pathToCatalog, "utf8");
+      const finalInventory = baseline.filter(
+        (item) => !["m1", "m2", "m3"].includes(item.id),
+      );
+      assert.strictEqual(
+        inventoryRemovalBlock(
+          modelInventory(baseline),
+          modelInventory(finalInventory),
+        ),
+        undefined,
+      );
+      allowRemoval();
+      let finalQueries = 0;
+      mock(vscode.lm, "selectChatModels", async () => {
+        finalQueries++;
+        return finalInventory;
+      });
+      await observePersistentLoss(
+        monitor,
+        baseline,
+        baseline.filter((item) => item.id !== "m1"),
+      );
+      assert.strictEqual(selectedCalls, 1);
+      assert.strictEqual(finalQueries, 1);
+      assert.strictEqual(fs.readFileSync(pathToCatalog, "utf8"), original);
+      assert.deepStrictEqual(fs.readdirSync(path.dirname(pathToCatalog)), [
+        "cordis.patch.yml",
+      ]);
+    });
+    test("home default protects m1 while the profile default remains m0", async () => {
+      const homePatch = path.join(root, "cordis.patch.yml");
+      fs.writeFileSync(homePatch, homeDefault("m1"));
+      const original = fs.readFileSync(pathToCatalog, "utf8");
+      assert.ok(original.includes('model: "m0"'));
+      const profileTarget: CatalogTarget = { path: pathToCatalog, kind: "dsh" };
+      assert.deepStrictEqual(
+        planCatalogRemoval(profileTarget, original, absent("m1")).candidates,
+        [],
+      );
+      await observePersistentLoss(new ModelRemovalMonitor(context, () => now));
+      assert.strictEqual(prompts, 0);
+      assert.strictEqual(selectedCalls, 0);
+      assert.strictEqual(fs.readFileSync(pathToCatalog, "utf8"), original);
+      assert.strictEqual(fs.readFileSync(homePatch, "utf8"), homeDefault("m1"));
+      assert.deepStrictEqual(fs.readdirSync(path.dirname(pathToCatalog)), [
+        "cordis.patch.yml",
+      ]);
+    });
+    test("home default changed during confirmation protects the selected route", async () => {
+      const homePatch = path.join(root, "cordis.patch.yml");
+      fs.writeFileSync(homePatch, homeDefault("m0"));
+      const original = fs.readFileSync(pathToCatalog, "utf8");
+      allowRemoval();
+      let confirmations = 0;
+      mock(vscode.window, "showWarningMessage", async () => {
+        confirmations++;
+        fs.writeFileSync(homePatch, homeDefault("m1"));
+        return "Remove selected entries";
+      });
+      mock(vscode.lm, "selectChatModels", async () => live());
+      await observePersistentLoss(new ModelRemovalMonitor(context, () => now));
+      assert.strictEqual(selectedCalls, 1);
+      assert.strictEqual(confirmations, 1);
+      assert.strictEqual(fs.readFileSync(pathToCatalog, "utf8"), original);
+      assert.strictEqual(fs.readFileSync(homePatch, "utf8"), homeDefault("m1"));
+      assert.deepStrictEqual(fs.readdirSync(path.dirname(pathToCatalog)), [
+        "cordis.patch.yml",
+      ]);
+    });
+    for (const [name, homeContent] of [
+      [
+        "ambiguous duplicate defaults",
+        homeDefault("m0").replace(
+          '    model: "m0"',
+          '    model: "m0"\n    model: "m2"',
+        ),
+      ],
+      [
+        "complex flow references",
+        '- id: agent-default-model\n  config: { model: "m1" }\n',
+      ],
+      [
+        "complex aliases",
+        "- id: agent-default-model\n  config:\n    model: *default-model\n",
+      ],
+    ]) {
+      test(`${name} in the home patch fail closed`, async () => {
+        const homePatch = path.join(root, "cordis.patch.yml");
+        fs.writeFileSync(homePatch, homeContent);
+        const original = fs.readFileSync(pathToCatalog, "utf8");
+        const profileTarget: CatalogTarget = {
+          path: pathToCatalog,
+          kind: "dsh",
+        };
+        assert.throws(() =>
+          planCatalogRemoval(profileTarget, original, absent("m1")),
+        );
+        await observePersistentLoss(
+          new ModelRemovalMonitor(context, () => now),
+        );
+        assert.strictEqual(prompts, 0);
+        assert.strictEqual(selectedCalls, 0);
+        assert.strictEqual(fs.readFileSync(pathToCatalog, "utf8"), original);
+        assert.strictEqual(fs.readFileSync(homePatch, "utf8"), homeContent);
+        assert.deepStrictEqual(fs.readdirSync(path.dirname(pathToCatalog)), [
+          "cordis.patch.yml",
+        ]);
+      });
+    }
+    test("legacy target resolves home references from its own custom parent", () => {
+      const customHome = path.join(root, "custom-home");
+      fs.mkdirSync(customHome);
+      const legacyTarget: CatalogTarget = {
+        path: path.join(customHome, "settings.yaml"),
+        kind: "dsh",
+      };
+      const original = createDshManagedBlock({
+        baseURL: "http://127.0.0.1:23333/api/openai/v1/",
+        modelId: "m0",
+        models: models().map(modelToDshConfig),
+        format: "legacy-settings",
+      });
+      fs.writeFileSync(legacyTarget.path, original);
+      fs.writeFileSync(path.join(root, "cordis.patch.yml"), homeDefault("m2"));
+      fs.writeFileSync(
+        path.join(customHome, "cordis.patch.yml"),
+        homeDefault("m1"),
+      );
+      const plan = planCatalogRemoval(
+        legacyTarget,
+        original,
+        absent("m1", "m2"),
+      );
+      assert.deepStrictEqual(
+        plan.candidates.map((row) => row.id),
+        ["m2"],
+      );
+      assert.strictEqual(removeCatalogModels(plan, absent("m1")), original);
+      assert.ok(removeCatalogModels(plan, absent("m2")).includes('- id: "m1"'));
+      assert.ok(
+        !removeCatalogModels(plan, absent("m2")).includes('- id: "m2"'),
+      );
+      assert.strictEqual(fs.readFileSync(legacyTarget.path, "utf8"), original);
+    });
     test("first healthy inventory establishes a baseline without suggesting stale configured rows", async () => {
       const monitor = new ModelRemovalMonitor(context, () => now);
       const before = fs.readFileSync(pathToCatalog, "utf8");
