@@ -2,9 +2,9 @@
 
 ## Connect and choose models
 
-1. Keep VS Code running with GitHub Copilot signed in and Agent Maestro's API server started.
+1. Keep VS Code running with a language-model provider authorized (for example GitHub Copilot) and Agent Maestro's API server started.
 2. Run **Agent Maestro: Configure DSH Settings**. Choose **DSH Desktop**, a named **DSH CLI / Web Profile**, or **Legacy DSH**.
-3. Choose the default model. Setup refreshes VS Code model metadata and writes **all proxy-supported models**, not only the default. Switch among those models in DSH Desktop's model picker.
+3. For modern profiles, choose the default model. Setup refreshes VS Code model metadata and writes **all proxy-supported models**, not only the default. Legacy mode exports the provider catalog but does not persist an agent-default override; select the default in the legacy client separately. Switch among those models in DSH Desktop's model picker.
 4. Supply `AGENT_MAESTRO_API_KEY` in the environment inherited by DSH. Use the key configured in Agent Maestro, or a nonempty placeholder if proxy authentication is disabled. No literal secret is written to the patch.
 5. Start a new DSH session to use a changed default. Existing sessions can retain their logged model. If configuration does not refresh, fully quit/reopen DSH.
 
@@ -50,7 +50,7 @@ The example's ID, limits and image capability are illustrative. Only models repo
 
 ## Model metadata
 
-- IDs are preserved and deduplicated; display names receive ` (Agent Maestro)` once.
+- Copilot IDs are preserved unless they occupy the reserved qualified prefix. Other vendors receive stable qualified route IDs to distinguish identical raw IDs. Display names receive ` (Agent Maestro)` once, with vendor/internal-alias detail where needed.
 - Runtime `maxInputTokens` becomes a **conservative** DSH `contextWindow`. DSH defines this as combined request/response capacity and reserves output/headroom during compaction; usable prompt capacity can be smaller. Setup does not invent a larger physical context limit.
 - A known positive `maxOutputTokens` becomes DSH `maxTokens`, which is both an output cap and an explicit default request output allowance. Unknown limits are omitted.
 - `imageInput` or `supportsImageToText` enables `[text, image]`; missing/false capability uses `[text]`. Declaring vision does not prove the hosted model accepts an actual image request.
@@ -70,7 +70,7 @@ The chat proxy does not automatically provide DSH's `web_search`. DSH executes t
 
 ## Troubleshooting
 
-- **No available models:** check Copilot sign-in and VS Code model availability. Models from other vendors may appear in general discovery but are not necessarily proxy-supported.
+- **No available models:** check the selected provider's sign-in/authorization and VS Code model availability. Other vendors use qualified route IDs rather than their raw IDs; a registry entry does not guarantee the endpoint can complete a request.
 - **Only one model appears:** rerun setup with this version; it exports the complete eligible catalog. For an unmanaged file, perform the suggested merge.
 - **Managed-block conflict:** keep exactly one start/end marker pair and remove additional overrides of the same target IDs only after reviewing what they configure. Never delete unrelated UI/MCP settings to silence the warning.
 - **Authentication failure:** check the key configured in Agent Maestro and the key reference inherited by DSH; do not use a search-provider key as the Maestro key.

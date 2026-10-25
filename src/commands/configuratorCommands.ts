@@ -6,6 +6,11 @@ import * as vscode from "vscode";
 
 import { ProxyServer } from "../server/ProxyServer";
 import {
+  mergeBuddySettings,
+  readBuddySettings,
+  writeBuddySettings,
+} from "../utils/buddySettings";
+import {
   chatModelsCache,
   getChatModelsQuickPickItems,
 } from "../utils/chatModels";
@@ -47,27 +52,6 @@ function withAgentMaestroSuffix(name?: string): string | undefined {
   return name.endsWith(AGENT_MAESTRO_NAME_SUFFIX)
     ? name
     : `${name}${AGENT_MAESTRO_NAME_SUFFIX}`;
-}
-
-interface WorkBuddyModelConfig {
-  id: string;
-  name?: string;
-  vendor?: string;
-  apiKey?: string;
-  maxInputTokens?: number;
-  maxOutputTokens?: number;
-  url?: string;
-  temperature?: number;
-  supportsToolCall?: boolean;
-  supportsImages?: boolean;
-  supportsReasoning?: boolean;
-  relatedModels?: Record<string, string>;
-}
-
-interface WorkBuddyModelsFileConfig {
-  models?: WorkBuddyModelConfig[];
-  availableModels?: string[];
-  [key: string]: unknown;
 }
 
 export function registerConfiguratorCommands(
@@ -855,48 +839,18 @@ export function registerConfiguratorCommands(
         const workBuddyModelsPaths = configDirs.map((dir) =>
           path.join(dir, "models.json"),
         );
-        // Primary path is used for the existing-config read/merge logic below.
-        const workBuddyModelsPath = workBuddyModelsPaths[0];
-
-        let existingConfig: WorkBuddyModelsFileConfig = {};
-        let fileExists = false;
-        let parseError = false;
-
-        try {
-          fs.accessSync(workBuddyModelsPath);
-          fileExists = true;
-          try {
-            existingConfig = JSON.parse(
-              fs.readFileSync(workBuddyModelsPath, "utf8"),
-            ) as WorkBuddyModelsFileConfig;
-          } catch (error) {
-            parseError = true;
-            logger.warn(
-              `Failed to parse existing CodeBuddy / WorkBuddy config: ${error instanceof Error ? error.message : String(error)}`,
-            );
+        const snapshots = workBuddyModelsPaths.map(readBuddySettings);
+        for (const snapshot of snapshots) {
+          if (snapshot.original === undefined) {
+            continue;
           }
-
-          const prompt = parseError
-            ? "Failed to load existing models.json. Do you want to create a fresh configuration?"
-            : "models.json already exists. Do you want to update it?";
-
-          const shouldOverride = await vscode.window.showQuickPick(
-            ["Yes", "No"],
-            {
-              title: "CodeBuddy / WorkBuddy Settings Found",
-              placeHolder: prompt,
-            },
-          );
-
-          if (shouldOverride !== "Yes") {
+          const answer = await vscode.window.showQuickPick(["Yes", "No"], {
+            title: "Existing CodeBuddy / WorkBuddy settings",
+            placeHolder: `Merge Maestro models into ${snapshot.path}? Existing custom models, keys and whitelists are preserved.`,
+          });
+          if (answer !== "Yes") {
             return;
           }
-
-          if (parseError) {
-            existingConfig = {};
-          }
-        } catch (error) {
-          // File doesn't exist, continue with creation
         }
 
         const modelOptions = await getChatModelsQuickPickItems({
@@ -949,15 +903,8 @@ export function registerConfiguratorCommands(
         }
 
         const proxyPort = proxy.getStatus().port;
-        const existingModels = Array.isArray(existingConfig.models)
-          ? existingConfig.models
-          : [];
-        const existingModelsById = new Map(
-          existingModels.map((model) => [model.id, model] as const),
-        );
         const updatedModelsWithSuffixedNames = availableModelItems.map(
           (model) => {
-            const existingModel = existingModelsById.get(model.modelId);
             // Copilot exposes image support as `supportsImageToText`; the VS
             // Code API type declares `imageInput`. Check both. Return
             // `undefined` when neither is reported so we can fall back to the
@@ -975,16 +922,15 @@ export function registerConfiguratorCommands(
               model.capabilities?.supportsToolCalling;
             const toolCallingSupported =
               toolCallingCap !== undefined
-                ? toolCallingCap !== false
+                ? toolCallingCap !== false && toolCallingCap !== 0
                 : supportsToolCallingCap !== undefined
                   ? supportsToolCallingCap === true
                   : undefined;
             return {
-              ...existingModel,
               id: model.modelId,
               name: withAgentMaestroSuffix(model.label),
-              vendor: existingModel?.vendor ?? "OpenAI",
-              apiKey: existingModel?.apiKey ?? "Powered by Agent Maestro",
+              vendor: "OpenAI",
+              apiKey: "Powered by Agent Maestro",
               ...(model.maxInputTokens
                 ? { maxInputTokens: model.maxInputTokens }
                 : {}),
@@ -992,46 +938,55 @@ export function registerConfiguratorCommands(
                 ? { maxOutputTokens: model.maxOutputTokens }
                 : {}),
               url: `http://${LOOPBACK_HOST}:${proxyPort}/api/openai/v1/chat/completions`,
-              // Capability flags: the live API value wins over the stale
-              // existing value. Only fall back to the existing value (then a
-              // default) when the API doesn't report the capability at all.
-              supportsToolCall:
-                toolCallingSupported ?? existingModel?.supportsToolCall ?? true,
-              supportsImages:
-                imageSupported ?? existingModel?.supportsImages ?? false,
+              ...(toolCallingSupported !== undefined
+                ? { supportsToolCall: toolCallingSupported }
+                : {}),
+              ...(imageSupported !== undefined
+                ? { supportsImages: imageSupported }
+                : {}),
             };
           },
         );
-        // Drop any pre-existing `availableModels` whitelist. Agent Maestro only
-        // contributes custom models; we must never restrict the model list to
-        // just them, or the app's built-in models get filtered out. Spreading
-        // `existingConfig` would otherwise carry over a stale whitelist.
-        const { availableModels: _ignored, ...existingConfigWithoutWhitelist } =
-          existingConfig;
-        void _ignored;
-        const updatedConfig: WorkBuddyModelsFileConfig = {
-          ...existingConfigWithoutWhitelist,
-          models: updatedModelsWithSuffixedNames,
-        };
-
-        const serializedConfig = JSON.stringify(updatedConfig, null, 2);
-        for (const targetPath of workBuddyModelsPaths) {
-          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-          fs.writeFileSync(targetPath, serializedConfig);
-          logger.info(
-            `CodeBuddy / WorkBuddy settings ${fileExists ? "updated" : "created"}: ${targetPath}`,
+        let updated = 0;
+        const failures: string[] = [];
+        for (const snapshot of snapshots) {
+          try {
+            const settings = mergeBuddySettings(
+              snapshot.settings,
+              updatedModelsWithSuffixedNames,
+            );
+            if (
+              vscode.workspace.textDocuments.some(
+                (document) =>
+                  document.isDirty &&
+                  document.uri.fsPath.toLowerCase() ===
+                    snapshot.path.toLowerCase(),
+              )
+            ) {
+              throw new Error("Unsaved settings changes are open in an editor");
+            }
+            if (writeBuddySettings(snapshot, settings)) {
+              updated++;
+            }
+          } catch (error) {
+            failures.push(`${snapshot.path}: ${String(error)}`);
+          }
+        }
+        if (failures.length) {
+          vscode.window.showWarningMessage(
+            `Updated ${updated} CodeBuddy / WorkBuddy file(s); skipped ${failures.length}: ${failures.join("; ")}`,
+          );
+        } else {
+          vscode.window.showInformationMessage(
+            `CodeBuddy / WorkBuddy setup completed: ${updated} file(s) changed. Custom models, unavailable entries and per-file settings were retained. Existing availableModels whitelists are unchanged; edit them explicitly if you want new models visible.`,
           );
         }
-
         await rememberCatalogTargets(
           context,
           workBuddyModelsPaths.map((filePath) => ({
             path: filePath,
             kind: "workbuddy" as const,
           })),
-        );
-        vscode.window.showInformationMessage(
-          `CodeBuddy / WorkBuddy settings ${fileExists ? "updated" : "created"} successfully! All proxy-eligible models point to Agent Maestro proxy server for OpenAI-compatible API.`,
         );
       }, "Failed to configure CodeBuddy / WorkBuddy settings"),
     ),

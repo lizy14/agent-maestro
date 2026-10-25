@@ -723,6 +723,26 @@ suite("Optional unavailable model catalog removal", () => {
         assert.strictEqual(fs.readFileSync(pathToCatalog, "utf8"), original);
       });
     }
+    test("observations reset missing evidence even while interaction processing is delayed", async () => {
+      const monitor = new ModelRemovalMonitor(context, () => now);
+      await check(monitor, models());
+      await check(monitor, live());
+      now += REMOVAL_CONFIRM_DELAY_MS;
+      await check(monitor, live());
+      now += REMOVAL_CONFIRM_DELAY_MS;
+      monitor.observe(models());
+      now += 5 * 60 * 1000;
+      await check(monitor, live());
+      assert.strictEqual(prompts, 0);
+      now += REMOVAL_CONFIRM_DELAY_MS;
+      await check(monitor, live());
+      assert.strictEqual(prompts, 0);
+      monitor.observe([]);
+      now += 5 * 60 * 1000;
+      await check(monitor, live());
+      assert.strictEqual(prompts, 0);
+    });
+
     test("reappeared selected model is kept by the final inventory query", async () => {
       const monitor = new ModelRemovalMonitor(context, () => now);
       const original = fs.readFileSync(pathToCatalog, "utf8");

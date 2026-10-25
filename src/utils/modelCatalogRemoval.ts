@@ -490,6 +490,29 @@ export class ModelRemovalMonitor {
     private now: () => number = Date.now,
   ) {}
 
+  observe(models: vscode.LanguageModelChat[]): void {
+    const current = modelInventory(models);
+    const previous = this.context.globalState.get<ModelInventoryEntry[]>(
+      REMOVAL_INVENTORY_KEY,
+      [],
+    );
+    if (inventoryRemovalBlock(previous, current)) {
+      this.missingSince.clear();
+      return;
+    }
+    const present = new Set(current.map((item) => item.routeId));
+    for (const id of this.missingSince.keys()) {
+      if (present.has(id)) {
+        this.missingSince.delete(id);
+      }
+    }
+    for (const key of this.handled) {
+      if (present.has(key.slice(key.indexOf("\0") + 1))) {
+        this.handled.delete(key);
+      }
+    }
+  }
+
   async check(
     models: vscode.LanguageModelChat[],
     scheduleRecheck: () => void,

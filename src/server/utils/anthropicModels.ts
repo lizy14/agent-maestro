@@ -4,6 +4,12 @@ import {
 } from "@anthropic-ai/sdk/resources/models";
 import * as vscode from "vscode";
 
+import {
+  anthropicModelRouteId,
+  isQualifiedModelId,
+  resolveQualifiedModel,
+} from "../../utils/modelIdentity";
+
 export interface AnthropicModelsResponse {
   data: ModelInfo[];
   first_id: string | null;
@@ -75,7 +81,7 @@ export function convertVSCodeModelToAnthropicModel(
   model: vscode.LanguageModelChat,
 ): ModelInfo {
   return {
-    id: model.id,
+    id: anthropicModelRouteId(model),
     capabilities: convertVSCodeCapabilitiesToAnthropic(model),
     created_at: UNKNOWN_MODEL_CREATED_AT,
     display_name: model.name,
@@ -88,9 +94,16 @@ export function convertVSCodeModelToAnthropicModel(
 export function createAnthropicModelsResponse(
   models: vscode.LanguageModelChat[],
 ): AnthropicModelsResponse {
-  const data = models
-    .filter(isClaudeModel)
-    .map(convertVSCodeModelToAnthropicModel);
+  const data = [
+    ...new Map(
+      models
+        .filter(isClaudeModel)
+        .map((model) => [
+          anthropicModelRouteId(model),
+          convertVSCodeModelToAnthropicModel(model),
+        ]),
+    ).values(),
+  ];
 
   return {
     data,
@@ -104,6 +117,17 @@ export function findAnthropicModelById(
   models: vscode.LanguageModelChat[],
   modelId: string,
 ): ModelInfo | null {
-  const model = models.find((m) => isClaudeModel(m) && m.id === modelId);
+  const eligible = models.filter(isClaudeModel);
+  if (isQualifiedModelId(modelId)) {
+    const model = resolveQualifiedModel(modelId, eligible);
+    return model ? convertVSCodeModelToAnthropicModel(model) : null;
+  }
+  const matches = eligible.filter((model) => model.id === modelId);
+  const copilot = matches.find((model) => model.vendor === "copilot");
+  const model =
+    copilot ??
+    (new Set(matches.map((candidate) => candidate.vendor)).size === 1
+      ? matches[0]
+      : undefined);
   return model ? convertVSCodeModelToAnthropicModel(model) : null;
 }

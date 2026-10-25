@@ -194,7 +194,14 @@ export const getChatModelsQuickPickItems = async (
   options?: GetChatModelsOptions,
 ) => {
   // Get available models from cache first, fallback to direct API call
-  let allModels = await chatModelsCache.getChatModels();
+  const allModels = [
+    ...new Map(
+      (await chatModelsCache.getChatModels()).map((model) => [
+        modelRouteId(model),
+        model,
+      ]),
+    ).values(),
+  ];
   if (allModels.length === 0) {
     return [];
   }
@@ -205,12 +212,27 @@ export const getChatModelsQuickPickItems = async (
     openai: [],
     other: [],
   };
-  let recommendedModel: vscode.LanguageModelChat | null = null;
+  const recommendedId = options?.recommendedModelId;
+  const recommendedModel = recommendedId
+    ? allModels
+        .filter(
+          (model) =>
+            modelRouteId(model) === recommendedId ||
+            (!isQualifiedModelId(recommendedId) && model.id === recommendedId),
+        )
+        .sort(
+          (a, b) =>
+            Number(b.vendor === SUPPORTED_VENDOR) -
+              Number(a.vendor === SUPPORTED_VENDOR) ||
+            a.vendor.localeCompare(b.vendor) ||
+            modelRouteId(a).localeCompare(modelRouteId(b)),
+        )[0]
+    : undefined;
 
-  // Categorize models into families
+  // Only one provider route becomes the recommendation; colliding raw IDs remain selectable.
   for (const m of allModels) {
-    if (options?.recommendedModelId && m.id === options.recommendedModelId) {
-      recommendedModel = m;
+    if (m === recommendedModel) {
+      continue;
     } else if (m.family.includes("claude")) {
       modelGroups.claude.push(m);
     } else if (m.family.includes("gemini")) {

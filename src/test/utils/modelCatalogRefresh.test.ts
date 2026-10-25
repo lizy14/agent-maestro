@@ -412,6 +412,55 @@ suite("Model catalog refresh", () => {
     assert.ok(targets.includes(remembered.path));
     assert.strictEqual(new Set(targets).size, targets.length);
   });
+  test("an unanswered notification never blocks later model cache refresh", async function () {
+    this.timeout(5000);
+    file("profiles/desktop/cordis.patch.yml", `${block()}\n`);
+    const old = model("old"),
+      fresh = model("fresh"),
+      later = model("later");
+    state.set(MODEL_SNAPSHOT_KEY, [modelIdentity(old)]);
+    let inventory = [old, fresh];
+    let cached = inventory;
+    let event: (() => void) | undefined;
+    let queries = 0;
+    let prompts = 0;
+    let release: ((value: string | undefined) => void) | undefined;
+    mock(vscode.lm, "onDidChangeChatModels", (listener: () => void) => {
+      event = listener;
+      return { dispose() {} };
+    });
+    mock(vscode.lm, "selectChatModels", async () => {
+      queries++;
+      return inventory;
+    });
+    mock(
+      chatModelsCache,
+      "refresh",
+      async (snapshot: vscode.LanguageModelChat[]) => {
+        cached = snapshot;
+      },
+    );
+    mock(chatModelsCache, "getChatModels", async () => cached);
+    mock(vscode.window, "showInformationMessage", async () => {
+      prompts++;
+      return new Promise<string | undefined>((resolve) => {
+        release = resolve;
+      });
+    });
+    const watcher = registerModelCatalogWatcher(context);
+    watchers.push(watcher);
+    await new Promise((resolve) => setTimeout(resolve, 850));
+    assert.strictEqual(prompts, 1);
+    inventory = [old, fresh, later];
+    event?.();
+    await new Promise((resolve) => setTimeout(resolve, 850));
+    assert.strictEqual(queries, 2);
+    assert.ok(cached.some((item) => item.id === "later"));
+    assert.strictEqual(prompts, 1);
+    watcher.dispose();
+    release?.(undefined);
+  });
+
   test("watcher prompts for newly observed models and updates only after approval", async function () {
     this.timeout(5000);
     const original = `${block()}\n`;
