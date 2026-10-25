@@ -44,6 +44,12 @@ The DSH-specific suites cover complete eligible model catalogs, separate default
 
 The scoped DSH suites passed **219 tests** during this change's verification using an isolated local VS Code test host. Counts can change as coverage grows; use current runner output. Type checking, ESLint and test compilation also passed. These checks do not establish live DSH/Copilot image/chat/search behavior. Follow the [DSH setup guide](dsh-setup.md) for a manual connectivity check.
 
+## Model catalog refresh coverage
+
+`utils/modelCatalogRefresh.test.ts` covers all-vendor route identities, duplicate raw IDs, exact qualified resolution, protocol-safe IDs and 1M suffix handling, generated DSH catalog ownership, independent Buddy credentials/custom settings, guarded writes/backups, registration notifications, first-inventory silence, debounce/disposal and dismissal without writes. File tests use temporary directories and mocked registration events; they do not execute hosted model requests.
+
+Manual verification should register a test LM provider while the extension runs, confirm the notification names its vendor, dismiss once and verify no files change, then register another model and approve the update. Check preexisting DSH defaults and independently customized Buddy files remain unchanged except for appended rows. Review ambiguous/unmanaged YAML rather than deleting it. Real registration UI and hosted-provider compatibility require this manual check; mocked event tests do not prove them.
+
 ## Manual Validation
 
 Unit tests do not prove UI behavior or live provider compatibility. Record the AM revision, VS Code/client versions, model, isolated ports, expected output, and relevant AM logs for manual runs. Avoid sharing raw request/session logs without applying the [logging guidance](llm-compatibility.md#diagnostic-logs).

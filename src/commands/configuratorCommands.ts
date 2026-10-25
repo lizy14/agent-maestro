@@ -33,6 +33,11 @@ import {
   updateDshSettingsContent,
 } from "../utils/dshSettings";
 import { logger } from "../utils/logger";
+import {
+  modelToDshConfig,
+  rememberCatalogTargets,
+} from "../utils/modelCatalogs";
+import { modelDisplayName, modelRouteId } from "../utils/modelIdentity";
 import { updateEnvFile } from "../utils/updateEnvFile";
 import { createCommandHandler } from "./commandHandler";
 
@@ -541,30 +546,7 @@ export function registerConfiguratorCommands(
 
         const catalog = new Map<string, DshModelConfig>();
         for (const model of chatModelsCache.getCachedModels()) {
-          const runtimeModel = model as vscode.LanguageModelChat & {
-            maxOutputTokens?: number;
-            capabilities?: {
-              imageInput?: boolean;
-              supportsImageToText?: boolean;
-            };
-          };
-          const supportsImages =
-            runtimeModel.capabilities?.imageInput === true ||
-            runtimeModel.capabilities?.supportsImageToText === true;
-          catalog.set(model.id, {
-            modelId: model.id,
-            modelName: model.name.endsWith(" (Agent Maestro)")
-              ? model.name
-              : `${model.name} (Agent Maestro)`,
-            modelContextWindow:
-              model.maxInputTokens > 0 ? model.maxInputTokens : undefined,
-            modelMaxOutputTokens:
-              runtimeModel.maxOutputTokens !== undefined &&
-              runtimeModel.maxOutputTokens > 0
-                ? runtimeModel.maxOutputTokens
-                : undefined,
-            modelInput: supportsImages ? ["text", "image"] : ["text"],
-          });
+          catalog.set(modelRouteId(model), modelToDshConfig(model));
         }
         const proxyPort = proxy.getStatus().port;
         const managedBlock = createDshManagedBlock({
@@ -623,6 +605,9 @@ export function registerConfiguratorCommands(
           );
         }
         fs.writeFileSync(dshSettingsPath, update.content);
+        await rememberCatalogTargets(context, [
+          { path: dshSettingsPath, kind: "dsh" },
+        ]);
 
         vscode.window.showInformationMessage(
           `DSH settings ${fileExists ? "updated" : "created"} successfully at ${dshSettingsPath} with ${catalog.size} models! Switch models in DSH’s model picker. Restart DSH to apply. Set AGENT_MAESTRO_API_KEY in the environment inherited by DSH to the Agent Maestro LLM API key, or any non-empty placeholder if authentication is disabled.`,
@@ -899,7 +884,12 @@ export function registerConfiguratorCommands(
           )
           .map((model) => ({
             modelId: model.modelId,
-            label: model.label,
+            label: (() => {
+              const runtime = chatModelsCache
+                .getCachedModels()
+                .find((candidate) => modelRouteId(candidate) === model.modelId);
+              return runtime ? modelDisplayName(runtime) : model.label;
+            })(),
             maxInputTokens: model.maxInputTokens,
             maxOutputTokens: model.maxOutputTokens,
             capabilities: model.capabilities,
@@ -991,6 +981,13 @@ export function registerConfiguratorCommands(
             `CodeBuddy / WorkBuddy setup completed: ${updated} file(s) changed. Custom models, unavailable entries and per-file settings were retained. Existing availableModels whitelists are unchanged; edit them explicitly if you want new models visible.`,
           );
         }
+        await rememberCatalogTargets(
+          context,
+          workBuddyModelsPaths.map((filePath) => ({
+            path: filePath,
+            kind: "workbuddy" as const,
+          })),
+        );
       }, "Failed to configure CodeBuddy / WorkBuddy settings"),
     ),
   ];

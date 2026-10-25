@@ -24,7 +24,7 @@ This README and the [documentation index](docs/README.md) describe this checkout
 
 ### Prerequisites
 
-- VS Code **1.120.0 or newer**, with GitHub Copilot signed in and eligible models available. The LLM proxy currently selects models from the `copilot` vendor.
+- VS Code **1.120.0 or newer**, with at least one language-model provider installed and authorized (for example, GitHub Copilot). The proxy discovers registered models across vendors; endpoint access and quotas remain provider-dependent.
 - Install the client you want to use: Claude Code, Claude Desktop, Codex, or Gemini CLI. Installing a client alone does not provide proxy models.
 - Install Roo Code or a compatible variant such as Kilo Code only if you need task orchestration. Cline is optional and currently supports task creation only.
 
@@ -76,11 +76,11 @@ Once connected, try a normal task such as explaining a function in your project.
 
 ### One-Click Setup for DSH / DSH Desktop
 
-Run `Agent Maestro: Configure DSH Settings`, choose Desktop, a named CLI/Web profile, or legacy DSH, then choose the default model. **All proxy-supported models** are written to DSH's model catalog so you can switch models in Desktop's picker.
+Run `Agent Maestro: Configure DSH Settings`, choose Desktop, a named CLI/Web profile, or legacy DSH, then choose the default model for a modern profile. Legacy mode exports the provider catalog only; choose its active/default model in the legacy client. **All proxy-supported models** are written to DSH's model catalog so you can switch models in Desktop's picker.
 
 Desktop configuration uses `$DSH_HOME/profiles/desktop/cordis.patch.yml` (default `~/.dsh`); named profiles use their own directory. Cordis patches configure `llm-pi-ai` with `openai-completions` and the proxy's actual port, plus `agent-default-model`. Legacy mode writes `settings.yaml` with `openai-responses`.
 
-Each model retains its ID and receives a pretty name, runtime image-input capability, positive advertised context limit, and known output limit. `maxInputTokens` is mapped conservatively to DSH's combined `contextWindow`; DSH reserves completion/headroom, so usable input may be smaller. Unknown limits are not guessed. API keys are referenced through `AGENT_MAESTRO_API_KEY`, not stored as secrets in YAML.
+Each model retains its Copilot raw ID or receives a qualified vendor route ID, and receives a pretty name, runtime image-input capability, positive advertised context limit, and known output limit. `maxInputTokens` is mapped conservatively to DSH's combined `contextWindow`; DSH reserves completion/headroom, so usable input may be smaller. Unknown limits are not guessed. API keys are referenced through `AGENT_MAESTRO_API_KEY`, not stored as secrets in YAML.
 
 Existing files are backed up. Owned managed blocks are replaced without rewriting unrelated UI/MCP entries; conflicting extra target overrides or malformed markers require manual merging. For an unmanaged configuration, the existing document and suggested block open side by side. Replace/merge matching entries and preserve other providers; never append duplicate target IDs. Home-wide Cordis patches apply after profile patches.
 
@@ -124,6 +124,24 @@ This automatically creates or updates both `.codebuddy/models.json` and `.workbu
 }
 ```
 
+## Optional removal of unavailable models
+
+Previously observed models that disappear can be reviewed for removal from existing Maestro-managed DSH/Buddy lists. Nothing is removed automatically: select individual entries (none preselected), then confirm a dialog listing exact IDs and file paths. Defaults, explicit references, custom-labeled/non-Maestro entries and the last remaining models are protected. Existing write guards, dirty-editor checks and backups apply; availability is queried again after confirmation so reappeared models are kept.
+
+Conservative sanity rules override confidence: **no removal** when the inventory is empty, an entire provider disappears, or at least half of the previous global/provider inventory or a catalog's Maestro entries is missing. The previous baseline is retained, not replaced by an outage snapshot. Catalog-loss checks count **all currently absent catalog IDs**, including entries not yet confidence-qualified, and are repeated after confirmation. Higher-priority `$DSH_HOME/cordis.patch.yml` scalar/list references are protected too; unreadable or complex home patches require manual removal instead.
+
+Confidence grows with spaced observations (at least 30 seconds apart). Ordinarily an entry must remain absent for **at least five minutes and three observations**. A newer numeric version with the exact same series/suffix and vendor allows review after two observations and 30 seconds. For example, `gpt-5.5` → `gpt-5.6` is evidence; `gpt-5.6-mini`, another vendor, or utility aliases are not. These are heuristics for offering review, never proof of retirement and never permission to auto-delete. Reappearance or an outage resets evidence. Dismissed candidates are not repeatedly prompted during the session.
+
+## New-model notifications
+
+Agent Maestro listens for VS Code Language Model API model-registration changes across **all vendors**, including Copilot. The first successful inventory is a silent baseline; newly observed `(vendor, model ID)` pairs trigger a confirmation popup when existing DSH, CodeBuddy or WorkBuddy catalogs can be extended. No model request is sent to test availability, and no absent client configuration is created.
+
+Notifications show the exact vendor and model ID, not only a potentially duplicated display name. **Show update details** lists each affected file and only the IDs missing from that file; a DSH catalog already containing an alias is not offered an unnecessary update. Internal utility/dictation aliases are labeled with their raw IDs in DSH/Buddy, and non-Copilot variants include their vendor and ID in the display name.
+
+Choose **Update model lists** to append missing models to already populated Maestro catalogs. Existing defaults, model customizations, credentials, endpoints and unrelated settings are retained. Unanswered notifications do not hold the discovery/cache-refresh lock; later provider changes continue to refresh while interactions remain queued. Reappearance/outage observations reset deletion evidence immediately even while another notification remains unanswered. Each changed file is backed up; files edited during the prompt or with unsaved editor changes are skipped. DSH requires its generated managed model section; ambiguous/unmanaged YAML is offered for manual review. Dismissal makes no changes. User and open-workspace Buddy files, initialized DSH profiles and recorded setup targets are checked.
+
+Copilot IDs keep their existing names. Other vendors use stable `vscode-lm-`-qualified IDs so two providers offering the same raw ID cannot be routed accidentally to each other. The proxy resolves these IDs back to the original provider model; unknown qualified IDs fail rather than falling back. Model registration/capabilities do not guarantee hosted quota, authorization, vision or tool behavior. The prompt does not alter Claude Code, Codex or Gemini CLI configurations; see [client catalog investigation](docs/client-model-catalogs.md).
+
 ## Web Search
 
 Search is available when a supported client requests it. AM does not add search to every prompt.
@@ -147,9 +165,9 @@ These paths have different contracts: Gemini has no hosted-search integration he
 
 AM prefers Copilot-provided usage metadata when available and estimates token counts otherwise. A local estimate can differ from provider usage; see [context-window handling](docs/claude-code-context-window.md) for the exact configuration and limits.
 
-Run **Agent Maestro: Select Fallback Model** to choose a model for requests whose model ID cannot be matched. Exact and fuzzy matches take priority. Selecting `auto` leaves automatic model selection in effect; unavailable models can fall back to another available Copilot model.
+Run **Agent Maestro: Select Fallback Model** to choose a model for requests whose model ID cannot be matched. Exact and fuzzy matches take priority. Selecting `auto` leaves automatic model selection in effect; unqualified unavailable models can use the configured or automatic available-model fallback. Qualified vendor IDs fail exactly instead of falling across providers.
 
-`GET /api/v1/lm/chatModels` lists models discovered by VS Code, including vendors that may not be proxy-eligible. The Output channel distinguishes eligible Copilot models.
+`GET /api/v1/lm/chatModels` lists raw VS Code runtime identities. Configured catalogs use Copilot raw IDs or qualified vendor route IDs; Anthropic discovery emits Claude-discoverable aliases for qualified Claude-family routes. Availability in the registry does not establish provider authorization or successful generation.
 
 ## Configuration
 
