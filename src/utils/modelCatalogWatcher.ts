@@ -4,6 +4,10 @@ import * as vscode from "vscode";
 import { chatModelsCache } from "./chatModels";
 import { logger } from "./logger";
 import {
+  ModelRemovalMonitor,
+  REMOVAL_CONFIRM_DELAY_MS,
+} from "./modelCatalogRemoval";
+import {
   CatalogTarget,
   appendCatalogModels,
   findCatalogTargets,
@@ -26,6 +30,16 @@ export function registerModelCatalogWatcher(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running = false;
   let pending = false;
+  let removalTimer: ReturnType<typeof setTimeout> | undefined;
+  const removal = new ModelRemovalMonitor(context);
+  const recheckRemoval = () => {
+    if (!removalTimer && !disposed) {
+      removalTimer = setTimeout(() => {
+        removalTimer = undefined;
+        schedule();
+      }, REMOVAL_CONFIRM_DELAY_MS);
+    }
+  };
   const check = async () => {
     if (disposed) {
       return;
@@ -42,6 +56,7 @@ export function registerModelCatalogWatcher(
       }
       if (!all.length) {
         await chatModelsCache.refresh(all);
+        await removal.check(all, recheckRemoval, () => disposed);
         return;
       }
       const previous = context.globalState.get<string[]>(MODEL_SNAPSHOT_KEY);
@@ -59,6 +74,7 @@ export function registerModelCatalogWatcher(
       await context.globalState.update(MODEL_SNAPSHOT_KEY, [
         ...new Set([...seen, ...current]),
       ]);
+      await removal.check(all, recheckRemoval, () => disposed);
       if (disposed || !previous || !additions.length) {
         return;
       }
@@ -231,6 +247,9 @@ export function registerModelCatalogWatcher(
     disposed = true;
     if (timer) {
       clearTimeout(timer);
+    }
+    if (removalTimer) {
+      clearTimeout(removalTimer);
     }
     event.dispose();
   });

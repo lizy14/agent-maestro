@@ -124,6 +124,14 @@ This automatically creates or updates both `.codebuddy/models.json` and `.workbu
 }
 ```
 
+## Optional removal of unavailable models
+
+Previously observed models that disappear can be reviewed for removal from existing Maestro-managed DSH/Buddy lists. Nothing is removed automatically: select individual entries (none preselected), then confirm a dialog listing exact IDs and file paths. Defaults, explicit references, custom-labeled/non-Maestro entries and the last remaining models are protected. Existing write guards, dirty-editor checks and backups apply; availability is queried again after confirmation so reappeared models are kept.
+
+Conservative sanity rules override confidence: **no removal** when the inventory is empty, an entire provider disappears, or at least half of the previous global/provider inventory or a catalog's Maestro entries is missing. The previous baseline is retained, not replaced by an outage snapshot.
+
+Confidence grows with spaced observations (at least 30 seconds apart). Ordinarily an entry must remain absent for **at least five minutes and three observations**. A newer numeric version with the exact same series/suffix and vendor allows review after two observations and 30 seconds. For example, `gpt-5.5` → `gpt-5.6` is evidence; `gpt-5.6-mini`, another vendor, or utility aliases are not. These are heuristics for offering review, never proof of retirement and never permission to auto-delete. Reappearance or an outage resets evidence. Dismissed candidates are not repeatedly prompted during the session.
+
 ## New-model notifications
 
 Agent Maestro listens for VS Code Language Model API model-registration changes across **all vendors**, including Copilot. The first successful inventory is a silent baseline; newly observed `(vendor, model ID)` pairs trigger a confirmation popup when existing DSH, CodeBuddy or WorkBuddy catalogs can be extended. No model request is sent to test availability, and no absent client configuration is created.
