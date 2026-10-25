@@ -166,6 +166,11 @@
       },
       {
         "command": "agent-maestro.configureWorkBuddy",
+        "title": "Configure CodeBuddy / WorkBuddy Settings",
+        "category": "Agent Maestro"
+      },
+      {
+        "command": "agent-maestro.selectFallbackModel",
         "title": "Select Fallback Model",
         "category": "Agent Maestro"
       },
